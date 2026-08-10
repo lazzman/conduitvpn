@@ -5,13 +5,13 @@ const $ = (id) => document.getElementById(id);
 
 /* ---- theme ---- */
 // Three-way theme: system (follow OS) / dark / light, persisted.
-// Icon button cycles system -> dark -> light -> system.
 const themeBtn = $("btn-theme");
+const themeMenu = $("theme-menu");
+const themeMenuWrap = $("theme-menu-wrap");
 const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 let theme = localStorage.getItem("conduit-theme") || "system";
 if (!["system", "dark", "light"].includes(theme)) theme = "system";
 
-const THEME_NEXT = { system: "dark", dark: "light", light: "system" };
 const THEME_TITLE = { system: "主题：跟随系统", dark: "主题：深色", light: "主题：浅色" };
 
 function effectiveTheme() {
@@ -27,12 +27,37 @@ function applyTheme() {
   $("icon-theme-moon").hidden = theme !== "dark";
   $("icon-theme-monitor").hidden = theme !== "system";
   themeBtn.title = THEME_TITLE[theme];
+  document.querySelectorAll(".theme-option").forEach((option) => {
+    const selected = option.dataset.theme === theme;
+    option.classList.toggle("active", selected);
+    option.setAttribute("aria-checked", String(selected));
+  });
 }
-themeBtn.addEventListener("click", () => {
-  theme = THEME_NEXT[theme];
+
+function closeThemeMenu() {
+  themeMenu.hidden = true;
+  themeBtn.setAttribute("aria-expanded", "false");
+}
+
+themeBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  themeMenu.hidden = !themeMenu.hidden;
+  themeBtn.setAttribute("aria-expanded", String(!themeMenu.hidden));
+});
+themeMenu.addEventListener("click", (event) => {
+  const option = event.target.closest(".theme-option");
+  if (!option) return;
+  theme = option.dataset.theme;
   localStorage.setItem("conduit-theme", theme);
   applyTheme();
   drawChart();
+  closeThemeMenu();
+});
+document.addEventListener("click", (event) => {
+  if (!themeMenuWrap.contains(event.target)) closeThemeMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeThemeMenu();
 });
 darkQuery.addEventListener("change", () => {
   if (theme === "system") { applyTheme(); drawChart(); }

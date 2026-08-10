@@ -7,6 +7,7 @@ package webui
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
@@ -32,10 +33,29 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-// assetVersion busts proxy caches: bump it whenever the static assets
-// change (Cloudflare overrides our no-cache with a 4h browser TTL, so
-// the query string is the only reliable invalidation).
-const assetVersion = "14"
+var versionedAssets = []string{
+	"static/index.html",
+	"static/login.html",
+	"static/styles.css",
+	"static/app.js",
+}
+
+// assetVersion busts proxy caches. It is derived from the embedded assets so
+// a new binary cannot accidentally serve a stale JS/CSS pair through a CDN.
+var assetVersion = staticAssetVersion(staticFS)
+
+func staticAssetVersion(fsys fs.FS) string {
+	h := sha256.New()
+	for _, name := range versionedAssets {
+		data, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			panic(fmt.Sprintf("read embedded asset %q: %v", name, err))
+		}
+		_, _ = h.Write([]byte(name))
+		_, _ = h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8])
+}
 
 const sessionTTL = 30 * 24 * time.Hour
 

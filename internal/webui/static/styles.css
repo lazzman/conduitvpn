@@ -141,6 +141,41 @@ body {
 }
 .btn-icon svg[hidden] { display: none; }
 
+.theme-menu-wrap { position: relative; }
+.theme-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+}
+.theme-menu[hidden] { display: none; }
+.theme-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.theme-option:hover,
+.theme-option.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+}
+.theme-option svg { width: 15px; height: 15px; }
+
 /* ---- login page ---- */
 .login-body {
   display: flex;
