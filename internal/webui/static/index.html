@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AimiliVPN · Gateway</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true"><span>▲</span></div>
+    <div class="brand-text">
+      <span class="brand-name">AIMILI</span>
+      <span class="brand-sub">VPN GATEWAY</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <button id="btn-refresh" class="btn" title="立即拉取并测速">更新节点</button>
+    <div id="status-pill" class="pill pill-idle">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="status-text">IDLE</span>
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="cards" aria-label="网关状态">
+    <div class="card">
+      <div class="card-label">当前节点</div>
+      <div id="c-node" class="card-value mono">—</div>
+      <div id="c-node-sub" class="card-sub mono">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">隧道出口</div>
+      <div id="c-egress" class="card-value mono">—</div>
+      <div id="c-egress-sub" class="card-sub mono">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">代理端口</div>
+      <div id="c-proxy" class="card-value mono">—</div>
+      <div id="c-proxy-sub" class="card-sub">HTTP + SOCKS5 · 单端口</div>
+    </div>
+    <div class="card">
+      <div class="card-label">运行时长</div>
+      <div id="c-uptime" class="card-value mono">—</div>
+      <div id="c-blacklist" class="card-sub">—</div>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="节点列表">
+    <div class="panel-head">
+      <h2>节点</h2>
+      <div class="panel-actions">
+        <input id="node-filter" class="input" type="search" placeholder="过滤…" autocomplete="off">
+        <span id="node-count" class="count mono">0</span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="node-table">
+        <thead>
+          <tr>
+            <th class="num" data-sort="latency" data-dir="-1">延迟 <span class="sort-hint">↓</span></th>
+            <th data-sort="country">国家</th>
+            <th data-sort="host">主机</th>
+            <th data-sort="ip">IP</th>
+            <th data-sort="proto">协议</th>
+            <th class="num" data-sort="score">分数</th>
+            <th class="num" data-sort="ping">Ping</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="实时日志">
+    <div class="panel-head">
+      <h2>日志</h2>
+      <div class="panel-actions">
+        <div class="chips" id="log-chips">
+          <button class="chip active" data-level="all">全部</button>
+          <button class="chip" data-level="warn">警告</button>
+          <button class="chip" data-level="error">错误</button>
+        </div>
+        <button id="btn-scroll" class="btn btn-ghost active" title="自动滚动">跟随</button>
+        <button id="btn-clear-log" class="btn btn-ghost">清空</button>
+      </div>
+    </div>
+    <pre id="log-view" class="log-view mono"></pre>
+  </section>
+</main>
+
+<script src="./app.js"></script>
+</body>
+</html>

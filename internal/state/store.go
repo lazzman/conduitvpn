@@ -3,9 +3,11 @@
 package state
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 
 	"aimilivpn/internal/node"
 )
@@ -48,6 +50,41 @@ func (s *Store) LoadBlacklist() (map[string]BlacklistEntry, error) {
 		return nil, err
 	}
 	return bl, nil
+}
+
+// UIAuth holds the web UI secret path. It is persisted so the URL stays
+// stable across restarts.
+type UIAuth struct {
+	SecretPath string `json:"secret_path"`
+}
+
+func (s *Store) AuthPath() string { return filepath.Join(s.dir, "ui_auth.json") }
+
+// SecretPath returns the persisted secret path, generating and saving a
+// fresh one on first run.
+func (s *Store) SecretPath() string {
+	var auth UIAuth
+	if err := readJSON(s.AuthPath(), &auth); err == nil && auth.SecretPath != "" {
+		return auth.SecretPath
+	}
+	auth.SecretPath = randHex(24)
+	_ = writeJSON(s.AuthPath(), auth)
+	return auth.SecretPath
+}
+
+func randHex(n int) string {
+	const hexChars = "0123456789abcdef"
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// extremely unlikely; fall back to time-based entropy
+		for i := range b {
+			b[i] = byte(time.Now().UnixNano() >> uint(i%8))
+		}
+	}
+	for i := range b {
+		b[i] = hexChars[b[i]&0x0f]
+	}
+	return string(b)
 }
 
 func writeJSON(path string, v any) error {

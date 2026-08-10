@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"aimilivpn/internal/benchmark"
@@ -39,9 +41,24 @@ type Manager struct {
 	prober *health.Prober
 	tun    *tunnel.Tunnel
 
-	state     State
-	current   *node.Node
-	blacklist map[string]state.BlacklistEntry
+	state       State
+	stateDetail string
+	current     *node.Node
+	blacklist   map[string]state.BlacklistEntry
+	mu          sync.Mutex
+
+	startedAt  time.Time
+	refreshCh  chan struct{}
+	refreshReq atomic.Bool
+}
+
+// Snapshot is a point-in-time view for the web UI.
+type Snapshot struct {
+	State          string     `json:"state"`
+	Detail         string     `json:"detail"`
+	CurrentNode    *node.Node `json:"current_node,omitempty"`
+	BlacklistCount int        `json:"blacklist_count"`
+	UptimeSec      int64      `json:"uptime_sec"`
 }
 
 func New(cfg config.Config) *Manager {
@@ -51,6 +68,32 @@ func New(cfg config.Config) *Manager {
 		prober:    health.NewProber(cfg.HealthAddr, cfg.ProbeTimeout),
 		state:     StateIdle,
 		blacklist: map[string]state.BlacklistEntry{},
+		startedAt: time.Now(),
+		refreshCh: make(chan struct{}, 1),
+	}
+}
+
+// Snapshot returns the current supervisor view.
+func (m *Manager) Snapshot() Snapshot {
+	m.mu.Lock()
+	s := Snapshot{
+		State:          string(m.state),
+		Detail:         m.stateDetail,
+		CurrentNode:    m.current,
+		BlacklistCount: len(m.blacklist),
+		UptimeSec:      int64(time.Since(m.startedAt).Seconds()),
+	}
+	m.mu.Unlock()
+	return s
+}
+
+// TriggerFetch asks the supervisor to refresh the node pool now.
+func (m *Manager) TriggerFetch() {
+	if !m.refreshReq.Swap(true) {
+		select {
+		case m.refreshCh <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -61,13 +104,14 @@ func (m *Manager) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		m.refreshReq.Store(false) // consume any pending refresh request
 		nodes := m.fetchAndBench(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
 		if len(nodes) == 0 {
 			logx.Warn("no candidate nodes available; retrying in 30s")
-			if !sleepCtx(ctx, 30*time.Second) {
+			if !m.wait(ctx, 30*time.Second) {
 				return nil
 			}
 			continue
@@ -78,7 +122,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		}
 		m.setState(StateDrifting, "all candidates exhausted")
 		logx.Error("connect loop exhausted candidates", "err", err)
-		if !sleepCtx(ctx, 15*time.Second) {
+		if !m.wait(ctx, 15*time.Second) {
 			return nil
 		}
 	}
@@ -277,8 +321,24 @@ func (m *Manager) markBlacklisted(n *node.Node, reason string) {
 }
 
 func (m *Manager) setState(s State, detail string) {
+	m.mu.Lock()
 	m.state = s
+	m.stateDetail = detail
+	m.mu.Unlock()
 	logx.Info("state", "state", string(s), "detail", detail)
+}
+
+// wait sleeps d unless the context dies or a refresh is requested.
+// Returns false when the loop should restart early.
+func (m *Manager) wait(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-m.refreshCh:
+		return false
+	case <-time.After(d):
+		return true
+	}
 }
 
 func sanitizeName(s string) string {

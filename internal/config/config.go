@@ -30,6 +30,18 @@ type Config struct {
 	HealthAddr        string
 	OpenVPNAuthUser   string
 	OpenVPNAuthPass   string
+
+	// Proxy (M3)
+	LocalProxyHost string
+	LocalProxyPort int
+	ProxyUser      string
+	ProxyPass      string
+	ProxyMaxConns  int
+	DNSServer      string
+
+	// Web UI (M4)
+	UIHost string
+	UIPort int
 }
 
 func envStr(key, def string) string {
@@ -69,5 +81,15 @@ func Load() Config {
 		HealthAddr:        envStr("HEALTH_ADDR", "8.8.8.8:443"),
 		OpenVPNAuthUser:   envStr("OPENVPN_AUTH_USER", "vpn"),
 		OpenVPNAuthPass:   envStr("OPENVPN_AUTH_PASS", "vpn"),
+
+		LocalProxyHost: envStr("LOCAL_PROXY_HOST", "0.0.0.0"),
+		LocalProxyPort: envInt("LOCAL_PROXY_PORT", 7928),
+		ProxyUser:      envStr("LOCAL_PROXY_USER", ""),
+		ProxyPass:      envStr("LOCAL_PROXY_PASS", ""),
+		ProxyMaxConns:  envInt("LOCAL_PROXY_MAX_CONNECTIONS", 512),
+		DNSServer:      envStr("DNS_SERVER", "8.8.8.8"),
+
+		UIHost: envStr("UI_HOST", "0.0.0.0"),
+		UIPort: envInt("UI_PORT", 8787),
 	}
 }

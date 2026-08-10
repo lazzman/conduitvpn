@@ -1,5 +1,5 @@
 // AimiliVPN — VPNGate 代理网关管理器（Go 重写版）。
-// M2: 常驻守护进程。拉取 → 测速 → openvpn 连接（方案 B）→ HTTPS 探测 → 漂移。
+// 守护进程：proxy（单端口双协议）+ manager（隧道监督）+ webui（管理后台）。
 package main
 
 import (
@@ -11,7 +11,10 @@ import (
 	"aimilivpn/internal/config"
 	"aimilivpn/internal/logx"
 	"aimilivpn/internal/manager"
+	"aimilivpn/internal/proxy"
+	"aimilivpn/internal/state"
 	"aimilivpn/internal/tunnel"
+	"aimilivpn/internal/webui"
 )
 
 func main() {
@@ -32,7 +35,25 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	store := state.NewStore(cfg.DataDir)
 	m := manager.New(cfg)
+
+	proxySrv := proxy.New(cfg.LocalProxyHost, cfg.LocalProxyPort, cfg.ProxyUser, cfg.ProxyPass, cfg.DNSServer, cfg.ProxyMaxConns)
+	if err := proxySrv.Start(); err != nil {
+		logx.Error("proxy start failed", "err", err)
+		os.Exit(1)
+	}
+	defer proxySrv.Close()
+	logx.Info("proxy listening", "addr", proxySrv.Addr().String(), "dual", "http+socks5")
+
+	ui := webui.New(cfg, store, m)
+	if err := ui.Start(); err != nil {
+		logx.Error("webui start failed", "err", err)
+		os.Exit(1)
+	}
+	defer ui.Close()
+	logx.Info("webui listening", "addr", ui.Addr().String(), "path", "/"+ui.SecretPath())
+
 	logx.Info("aimilivpn starting", "data_dir", cfg.DataDir)
 	if err := m.Run(ctx); err != nil && ctx.Err() == nil {
 		logx.Error("manager exited", "err", err)

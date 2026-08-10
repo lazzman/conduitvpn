@@ -25,6 +25,7 @@ var (
 	level   = InfoLevel
 	ring    = make([]map[string]any, 0, ringMax)
 	ringMax = 1000
+	subs    []chan map[string]any
 )
 
 func Init(lvl string) {
@@ -64,9 +65,25 @@ func emit(l Level, lvl, msg string, kv ...any) {
 	if len(ring) > ringMax {
 		ring = ring[len(ring)-ringMax:]
 	}
+	for _, ch := range subs {
+		select {
+		case ch <- e:
+		default:
+		}
+	}
 	mu.Unlock()
 
 	os.Stdout.Write(append(line, '\n'))
+}
+
+// Subscribe returns a channel that receives every log entry (best
+// effort, drops when the consumer is slow). Used by the web UI SSE.
+func Subscribe() <-chan map[string]any {
+	ch := make(chan map[string]any, 256)
+	mu.Lock()
+	subs = append(subs, ch)
+	mu.Unlock()
+	return ch
 }
 
 // Recent returns the last n ring entries (for the future SSE log stream).

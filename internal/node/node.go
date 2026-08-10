@@ -21,7 +21,7 @@ type Node struct {
 	Message      string `json:"message"`
 
 	// Derived from the OpenVPN config.
-	ConfigText  string `json:"config_text"`
+	ConfigText  string `json:"config_text,omitempty"`
 	RemoteHost  string `json:"remote_host"`
 	RemotePort  int    `json:"remote_port"`
 	RemoteProto string `json:"remote_proto"`
