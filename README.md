@@ -15,9 +15,9 @@
 | ![login](docs/screenshots/login.png) | ![dark](docs/screenshots/dark.png) | ![light](docs/screenshots/light.png) |
 
 - 顶部状态卡片：当前节点 / 隧道出口 / 代理端口 / 运行时长
-- 路由模式：智能自动 / 固定国家（多选）/ 固定 IP（一键锁定）
+- 路由模式：智能自动 / 固定国家地区（多选）/ 固定 IP（一键锁定）
 - 实时延迟图表：后台每 10s 实测当前节点延迟
-- 节点表：延迟 / 国家 / 主机 / IP / 协议排序与过滤
+- 节点表：延迟 / 国家地区 / 主机 / IP / 协议排序与过滤
 - 日志流：SSE 实时滚动，级别过滤
 
 ---
@@ -90,7 +90,7 @@ internal/
 | 功能 | 说明 |
 | --- | --- |
 | 节点管理 | 自动拉取 VPNGate 节点列表，并发测速排序 |
-| 三种路由模式 | 智能自动（失效自动漂移）/ 固定国家（多选）/ 固定 IP（锁定单节点），运行时切换 |
+| 三种路由模式 | 智能自动（失效自动漂移）/ 固定国家地区（多选）/ 固定 IP（锁定单节点），运行时切换 |
 | 自动漂移 | 节点失效数秒内自动切换备用节点；固定模式持续重试锁定节点 |
 | 多协议入站 | HTTP + SOCKS5 单端口双协议（7928）、可选 hysteria2（7929/udp） |
 | hy2 远程接入 | 手机/Mac 等远程设备用 hy2 客户端连入，流量经 VPN 节点出口 |
@@ -183,7 +183,7 @@ HY2_PORT=7929 HY2_PASSWORD=你的密码 bash install.sh
 ### 路由模式 API
 
 ```bash
-# 固定国家（多选）
+# 固定国家地区（多选）
 curl -X PUT -H 'Content-Type: application/json' \
   -d '{"mode":"country","country":"JP,KR"}' \
   http://127.0.0.1:8787/<secret>/api/route
@@ -276,7 +276,7 @@ make vet      # 静态检查
 - [x] M4 webui（REST + SSE + 安全后缀 + 品牌化前端）
 - [x] M5 Dockerfile + install.sh + healthcheck
 - [x] M6 三种路由模式 + 运行时切换
-- [x] M7 国家/节点下拉 + 实时延迟图表
+- [x] M7 国家地区/节点下拉 + 实时延迟图表
 - [x] M8 上游代理（HTTP/SOCKS5 + sing-box 多协议/订阅）
 - [x] M9 hy2 入站网关
 

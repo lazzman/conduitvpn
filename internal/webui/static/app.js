@@ -108,7 +108,9 @@ function renderState(snap) {
     : snap.detail || "—";
 
   $("c-egress").textContent = n ? (n.ip || "—") : "—";
-  $("c-egress-sub").textContent = n ? `${n.country_long || ""} · ${n.operator || ""}`.trim() : "—";
+  $("c-egress-sub").textContent = n
+    ? [countryRegionName(n.country_short, n.country_long), n.operator].filter(Boolean).join(" · ") || "—"
+    : "—";
 
   $("c-proxy").textContent = snap.proxy_port || "7928";
   $("c-uptime").textContent = fmtUptime(snap.uptime_sec);
@@ -121,9 +123,9 @@ let sortKey = "latency";
 let sortDir = 1;
 let filterText = "";
 
-const COUNTRY_LONG = {
+const COUNTRY_REGION = {
   JP: "日本", KR: "韩国", US: "美国", GB: "英国", DE: "德国", FR: "法国", NL: "荷兰",
-  SG: "新加坡", CA: "加拿大", AU: "澳大利亚", HK: "香港", TW: "台湾", SE: "瑞典", FI: "芬兰",
+  SG: "新加坡", CA: "加拿大", AU: "澳大利亚", HK: "中国香港", MO: "中国澳门", TW: "中国台湾", SE: "瑞典", FI: "芬兰",
   TH: "泰国", IN: "印度", VN: "越南", MY: "马来西亚", ID: "印尼", PH: "菲律宾",
   IT: "意大利", ES: "西班牙", CH: "瑞士", PL: "波兰", RO: "罗马尼亚", TR: "土耳其",
   BR: "巴西", MX: "墨西哥", AR: "阿根廷", RU: "俄罗斯", UA: "乌克兰", CZ: "捷克",
@@ -131,6 +133,11 @@ const COUNTRY_LONG = {
   GR: "希腊", IL: "以色列", AE: "阿联酋", SA: "沙特", NZ: "新西兰", ZA: "南非",
   EE: "爱沙尼亚", LV: "拉脱维亚", LT: "立陶宛", BG: "保加利亚", HU: "匈牙利",
 };
+
+function countryRegionName(countryShort, fallback = "") {
+  const code = String(countryShort || "").trim().toUpperCase();
+  return COUNTRY_REGION[code] || fallback || code;
+}
 
 function loadNodes() {
   fetch("./api/nodes")
@@ -146,7 +153,8 @@ function populateRouteSelects() {
   nodes.forEach((n) => { if (n.country_short) seen[n.country_short] = true; });
   const codes = Object.keys(seen).sort();
   cc.innerHTML = codes.map((c) => {
-    const name = COUNTRY_LONG[c] || (nodes.find(n => n.country_short === c)?.country_long || c);
+    const node = nodes.find((n) => String(n.country_short || "").toUpperCase() === c);
+    const name = countryRegionName(c, node?.country_long);
     return `<button type="button" class="cc-chip" data-code="${c}" title="${name}">${c} · ${name}</button>`;
   }).join("");
   cc.querySelectorAll(".cc-chip").forEach((chip) => {
@@ -200,11 +208,12 @@ function renderTable() {
     const latCls = n.tested && n.latency_ms > 0
       ? (n.latency_ms < 200 ? "lat-ok" : n.latency_ms < 500 ? "lat-mid" : "lat-dead")
       : "lat-dead";
-    const country = n.country_short || "??";
+    const countryCode = String(n.country_short || "??").toUpperCase();
+    const country = countryRegionName(n.country_short, n.country_long);
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="num ${latCls}">${lat}</td>
-      <td><span class="country-code">${country}</span></td>
+      <td class="country-cell" title="${country}"><span class="country-code">${countryCode}</span><span class="country-name">${country}</span></td>
       <td class="host-cell" title="${n.host_name}">${n.host_name}</td>
       <td class="ip-cell" title="${n.ip}">${n.ip}</td>
       <td class="proto-cell">${n.remote_proto || "udp"}</td>
@@ -244,7 +253,7 @@ let routeCfg = { mode: "auto", country: "", node: "" };
 
 const ROUTE_LABEL = {
   auto: "智能自动配置",
-  country: "固定国家",
+  country: "固定国家地区",
   fixed: "固定 IP",
 };
 
@@ -265,7 +274,7 @@ function renderRoute() {
   applyChipSelection();
   if (routeCfg.node) $("route-node").value = routeCfg.node;
   const detail = routeCfg.mode === "country"
-    ? " · " + (routeCfg.country ? routeCfg.country.split(",").map((c) => COUNTRY_LONG[c] || c).join(" / ") : "未选择")
+    ? " · " + (routeCfg.country ? routeCfg.country.split(",").map((c) => countryRegionName(c)).join(" / ") : "未选择")
     : routeCfg.mode === "fixed" ? " · " + routeCfg.node : "";
   $("route-status").textContent = (ROUTE_LABEL[routeCfg.mode] || routeCfg.mode) + detail;
 }

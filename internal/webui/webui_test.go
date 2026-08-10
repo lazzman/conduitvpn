@@ -46,6 +46,31 @@ func TestStaticAssetVersionChangesWithContent(t *testing.T) {
 	}
 }
 
+func TestEmbeddedRegionLabels(t *testing.T) {
+	index, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), "固定国家地区") || !strings.Contains(string(index), `<th data-sort="country">国家地区</th>`) {
+		t.Fatal("index is missing country-region labels")
+	}
+
+	app, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`HK: "中国香港"`,
+		`MO: "中国澳门"`,
+		`TW: "中国台湾"`,
+		`country: "固定国家地区"`,
+	} {
+		if !strings.Contains(string(app), want) {
+			t.Errorf("app.js is missing %q", want)
+		}
+	}
+}
+
 func TestDemoRootRedirectsToSecretPath(t *testing.T) {
 	s := testServer(t, true)
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
