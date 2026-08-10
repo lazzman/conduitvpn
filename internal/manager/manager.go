@@ -127,6 +127,9 @@ func (m *Manager) TriggerFetch() {
 
 // Run is the supervisor loop. It blocks until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) error {
+	if m.cfg.UpstreamProxy != nil {
+		logx.Info("using upstream proxy for node fetch", "type", m.cfg.UpstreamProxy.Type, "addr", m.cfg.UpstreamProxy.Addr)
+	}
 	m.loadBlacklist()
 	for {
 		if ctx.Err() != nil {
@@ -174,7 +177,8 @@ func (m *Manager) Run(ctx context.Context) error {
 // kill the daemon.
 func (m *Manager) fetchAndBench(ctx context.Context) []*node.Node {
 	m.setState(StateFetching, "")
-	raw, err := vpngate.Fetch(ctx, m.cfg.APIURL, m.cfg.FetchTimeout)
+	client := vpngate.NewClient(m.cfg.UpstreamProxy, m.cfg.FetchTimeout)
+	raw, err := client.Fetch(ctx, m.cfg.APIURL)
 	if err != nil {
 		logx.Warn("fetch failed; falling back to cached nodes", "err", err)
 		cached, cerr := m.store.LoadNodes()
