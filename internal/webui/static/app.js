@@ -112,7 +112,7 @@ function renderTable() {
   tbody.innerHTML = "";
   if (rows.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="7" class="empty-note">暂无节点 — 点击右上角「更新节点」拉取</td>`;
+    tr.innerHTML = `<td colspan="8" class="empty-note">暂无节点 — 点击右上角「更新节点」拉取</td>`;
     tbody.appendChild(tr);
     return;
   }
@@ -131,9 +131,15 @@ function renderTable() {
       <td class="ip-cell" title="${n.ip}">${n.ip}</td>
       <td class="proto-cell">${n.remote_proto || "udp"}</td>
       <td class="num">${n.score ?? "—"}</td>
-      <td class="num">${n.ping ?? "—"}</td>`;
+      <td class="num">${n.ping ?? "—"}</td>
+      <td class="act-col"><button class="btn btn-ghost btn-lock" data-host="${n.host_name}" title="锁定此节点（固定 IP 模式）">锁定</button></td>`;
     tbody.appendChild(tr);
   }
+
+  // lock button: switch to fixed mode targeting this node
+  tbody.querySelectorAll(".btn-lock").forEach((btn) => {
+    btn.addEventListener("click", () => setRoute("fixed", "", btn.dataset.host));
+  });
 }
 
 document.querySelectorAll("#node-table thead th").forEach((th) => {
@@ -154,7 +160,74 @@ $("node-filter").addEventListener("input", (e) => {
   renderTable();
 });
 
+
+/* ---- route mode ---- */
+let routeCfg = { mode: "auto", country: "", node: "" };
+
+const ROUTE_LABEL = {
+  auto: "智能自动配置",
+  country: "固定国家",
+  fixed: "固定 IP",
+};
+
+function renderRoute() {
+  document.querySelectorAll("#route-seg .seg-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === routeCfg.mode);
+  });
+  $("route-country").hidden = routeCfg.mode !== "country";
+  $("route-node").hidden = routeCfg.mode !== "fixed";
+  $("route-country").value = routeCfg.country || "";
+  $("route-node").value = routeCfg.node || "";
+  const detail = routeCfg.mode === "country" ? " · " + routeCfg.country
+    : routeCfg.mode === "fixed" ? " · " + routeCfg.node : "";
+  $("route-status").textContent = (ROUTE_LABEL[routeCfg.mode] || routeCfg.mode) + detail;
+}
+
+function loadRoute() {
+  fetch("./api/route")
+    .then((r) => r.json())
+    .then((cfg) => { routeCfg = cfg; renderRoute(); })
+    .catch(() => {});
+}
+
+function setRoute(mode, country, node) {
+  const body = { mode, country: country || routeCfg.country, node: node || routeCfg.node };
+  $("route-msg").textContent = "应用中…";
+  fetch("./api/route", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+    .then((r) => r.json())
+    .then((res) => {
+      if (res.error) {
+        $("route-msg").textContent = res.error;
+        $("route-msg").classList.add("err");
+      } else {
+        $("route-msg").textContent = "已应用";
+        $("route-msg").classList.remove("err");
+        loadRoute();
+      }
+    })
+    .catch(() => { $("route-msg").textContent = "请求失败"; })
+    .finally(() => setTimeout(() => { $("route-msg").textContent = ""; }, 2500));
+}
+
+document.querySelectorAll("#route-seg .seg-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#route-seg .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    $("route-country").hidden = btn.dataset.mode !== "country";
+    $("route-node").hidden = btn.dataset.mode !== "fixed";
+  });
+});
+
+$("btn-route-apply").addEventListener("click", () => {
+  const mode = document.querySelector("#route-seg .seg-btn.active").dataset.mode;
+  setRoute(mode, $("route-country").value.trim().toUpperCase(), $("route-node").value.trim());
+});
+
 /* ---- logs ---- */
+
 let logLevel = "all";
 let follow = true;
 
@@ -262,4 +335,5 @@ fetch("./api/state")
 
 loadNodes();
 loadLogs();
+loadRoute();
 connectStream();

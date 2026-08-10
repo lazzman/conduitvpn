@@ -42,6 +42,11 @@ type Config struct {
 	// Web UI (M4)
 	UIHost string
 	UIPort int
+
+	// Route mode (M6)
+	RouteMode    string
+	RouteCountry string
+	RouteNode    string
 }
 
 func envStr(key, def string) string {
@@ -91,5 +96,9 @@ func Load() Config {
 
 		UIHost: envStr("UI_HOST", "0.0.0.0"),
 		UIPort: envInt("UI_PORT", 8787),
+
+		RouteMode:    envStr("ROUTE_MODE", "auto"),
+		RouteCountry: envStr("ROUTE_COUNTRY", ""),
+		RouteNode:    envStr("ROUTE_NODE", ""),
 	}
 }

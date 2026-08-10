@@ -3,6 +3,7 @@
 package webui
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,11 @@ import (
 
 //go:embed static
 var staticFS embed.FS
+
+// assetVersion busts proxy caches: bump it whenever the static assets
+// change (Cloudflare overrides our no-cache with a 4h browser TTL, so
+// the query string is the only reliable invalidation).
+const assetVersion = "5"
 
 type Server struct {
 	cfg    config.Config
@@ -86,6 +92,7 @@ func (s *Server) panelHandler() http.Handler {
 	prefix := "/" + s.secret
 	mux := http.NewServeMux()
 	mux.HandleFunc(prefix+"/api/state", s.apiState)
+	mux.HandleFunc(prefix+"/api/route", s.apiRoute)
 	mux.HandleFunc(prefix+"/api/nodes", s.apiNodes)
 	mux.HandleFunc(prefix+"/api/blacklist", s.apiBlacklist)
 	mux.HandleFunc(prefix+"/api/logs", s.apiLogs)
@@ -102,14 +109,35 @@ func (s *Server) panelHandler() http.Handler {
 		if p == "" {
 			p = "/"
 		}
+		if p == "/" {
+			serveIndex(w, r)
+			return
+		}
 		r2 := new(http.Request)
 		*r2 = *r
 		r2.URL = new(url.URL)
 		*r2.URL = *r.URL
 		r2.URL.Path = p
+		// Never let proxies (Cloudflare) cache static assets: the panel is
+		// embedded in the binary and updates must propagate immediately.
+		w.Header().Set("Cache-Control", "no-cache")
 		static.ServeHTTP(w, r2)
 	}))
 	return withSecurityHeaders(mux)
+}
+
+// serveIndex renders the panel HTML with the asset version injected so a
+// single const controls all cache busting.
+func serveIndex(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	data = bytes.ReplaceAll(data, []byte("__VER__"), []byte(assetVersion))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(data)
 }
 
 func withSecurityHeaders(next http.Handler) http.Handler {
@@ -123,6 +151,7 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
@@ -130,15 +159,43 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 	snap := s.mgr.Snapshot()
 	payload := map[string]any{
-		"state":           snap.State,
-		"detail":          snap.Detail,
-		"current_node":    sanitizeNode(snap.CurrentNode),
-		"blacklist_count": snap.BlacklistCount,
-		"uptime_sec":      snap.UptimeSec,
-		"proxy_port":      s.cfg.LocalProxyPort,
-		"ui_port":         s.cfg.UIPort,
+		"state":            snap.State,
+		"detail":           snap.Detail,
+		"current_node":     sanitizeNode(snap.CurrentNode),
+		"blacklist_count":  snap.BlacklistCount,
+		"uptime_sec":       snap.UptimeSec,
+		"proxy_port":       s.cfg.LocalProxyPort,
+		"ui_port":          s.cfg.UIPort,
+		"route_mode":       snap.RouteMode,
+		"route_country":    snap.RouteCountry,
+		"route_node":       snap.RouteNode,
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) apiRoute(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		mode, country, node := s.mgr.RouteConfig()
+		writeJSON(w, http.StatusOK, map[string]string{"mode": mode, "country": country, "node": node})
+	case http.MethodPut, http.MethodPost:
+		var body struct {
+			Mode    string `json:"mode"`
+			Country string `json:"country"`
+			Node    string `json:"node"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json: " + err.Error()})
+			return
+		}
+		if err := s.mgr.SetRouteConfig(body.Mode, body.Country, body.Node); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET or PUT"})
+	}
 }
 
 func (s *Server) apiNodes(w http.ResponseWriter, r *http.Request) {

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>Conduit · VPN Gateway</title>
-<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./styles.css?v=__VER__">
 </head>
 <body>
 <header class="topbar">
@@ -50,6 +50,24 @@
     </div>
   </section>
 
+  <section class="panel" aria-label="路由模式">
+    <div class="panel-head">
+      <h2>路由模式</h2>
+      <span id="route-status" class="card-sub mono">智能自动配置</span>
+    </div>
+    <div class="route-body">
+      <div class="seg" id="route-seg" role="tablist">
+        <button class="seg-btn active" data-mode="auto" role="tab">智能</button>
+        <button class="seg-btn" data-mode="country" role="tab">固定国家</button>
+        <button class="seg-btn" data-mode="fixed" role="tab">固定 IP</button>
+      </div>
+      <input id="route-country" class="input" placeholder="国家码，如 JP / KR / US" maxlength="16" autocomplete="off" hidden>
+      <input id="route-node" class="input input-wide" placeholder="节点 hostname 或 IP" autocomplete="off" hidden>
+      <button id="btn-route-apply" class="btn">应用</button>
+      <span id="route-msg" class="route-msg"></span>
+    </div>
+  </section>
+
   <section class="panel" aria-label="节点列表">
     <div class="panel-head">
       <h2>节点</h2>
@@ -69,6 +87,7 @@
             <th data-sort="proto">协议</th>
             <th class="num" data-sort="score">分数</th>
             <th class="num" data-sort="ping">Ping</th>
+            <th class="act-col">操作</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -93,6 +112,6 @@
   </section>
 </main>
 
-<script src="./app.js"></script>
+<script src="./app.js?v=__VER__"></script>
 </body>
 </html>

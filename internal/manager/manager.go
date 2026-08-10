@@ -47,10 +47,22 @@ type Manager struct {
 	blacklist   map[string]state.BlacklistEntry
 	mu          sync.Mutex
 
+	// Route mode (auto / country / fixed)
+	routeMode    string
+	routeCountry string
+	routeNode    string
+	modeMu       sync.Mutex
+	modeCh       chan struct{}
+
 	startedAt  time.Time
 	refreshCh  chan struct{}
 	refreshReq atomic.Bool
 }
+
+// errModeChanged aborts the current connect/monitor cycle so the loop
+// re-evaluates candidates under the new route mode without blacklisting
+// the node that was just disconnected.
+var errModeChanged = errors.New("route mode changed")
 
 // Snapshot is a point-in-time view for the web UI.
 type Snapshot struct {
@@ -59,18 +71,31 @@ type Snapshot struct {
 	CurrentNode    *node.Node `json:"current_node,omitempty"`
 	BlacklistCount int        `json:"blacklist_count"`
 	UptimeSec      int64      `json:"uptime_sec"`
+	RouteMode      string     `json:"route_mode"`
+	RouteCountry   string     `json:"route_country,omitempty"`
+	RouteNode      string     `json:"route_node,omitempty"`
 }
 
 func New(cfg config.Config) *Manager {
-	return &Manager{
-		cfg:       cfg,
-		store:     state.NewStore(cfg.DataDir),
-		prober:    health.NewProber(cfg.HealthAddr, cfg.ProbeTimeout),
-		state:     StateIdle,
-		blacklist: map[string]state.BlacklistEntry{},
-		startedAt: time.Now(),
-		refreshCh: make(chan struct{}, 1),
+	m := &Manager{
+		cfg:          cfg,
+		store:        state.NewStore(cfg.DataDir),
+		prober:       health.NewProber(cfg.HealthAddr, cfg.ProbeTimeout),
+		state:        StateIdle,
+		blacklist:    map[string]state.BlacklistEntry{},
+		startedAt:    time.Now(),
+		refreshCh:    make(chan struct{}, 1),
+		modeCh:       make(chan struct{}, 1),
+		routeMode:    cfg.RouteMode,
+		routeCountry: cfg.RouteCountry,
+		routeNode:    cfg.RouteNode,
 	}
+	// Persisted route config (set via the web UI) wins over env defaults.
+	if r, err := m.store.LoadRoute(); err == nil && r.Mode != "" {
+		m.routeMode, m.routeCountry, m.routeNode = r.Mode, r.Country, r.Node
+		logx.Info("route config loaded", "mode", r.Mode, "country", r.Country, "node", r.Node)
+	}
+	return m
 }
 
 // Snapshot returns the current supervisor view.
@@ -84,6 +109,8 @@ func (m *Manager) Snapshot() Snapshot {
 		UptimeSec:      int64(time.Since(m.startedAt).Seconds()),
 	}
 	m.mu.Unlock()
+	mode, country, node := m.routeConfig()
+	s.RouteMode, s.RouteCountry, s.RouteNode = mode, country, node
 	return s
 }
 
@@ -116,9 +143,22 @@ func (m *Manager) Run(ctx context.Context) error {
 			}
 			continue
 		}
-		err := m.connectLoop(ctx, nodes)
+		candidates := m.selectCandidates(nodes)
+		if len(candidates) == 0 {
+			mode, country, node := m.routeConfig()
+			logx.Error("no candidates for current route mode", "mode", mode, "country", country, "node", node)
+			if !m.wait(ctx, 20*time.Second) {
+				return nil
+			}
+			continue
+		}
+		err := m.connectLoop(ctx, candidates)
 		if ctx.Err() != nil {
 			return nil
+		}
+		if errors.Is(err, errModeChanged) {
+			logx.Info("route mode changed; re-evaluating candidates")
+			continue
 		}
 		m.setState(StateDrifting, "all candidates exhausted")
 		logx.Error("connect loop exhausted candidates", "err", err)
@@ -161,12 +201,14 @@ func (m *Manager) fetchAndBench(ctx context.Context) []*node.Node {
 
 // connectLoop tries nodes best-first until one connects and stays
 // healthy; each failure blacklists the node and moves to the next.
+// The fixed-mode node is never blacklisted (it is the user's explicit
+// lock choice).
 func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
 	for _, n := range nodes {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if m.isBlacklisted(n) {
+		if m.isBlacklisted(n) && !m.isFixedNode(n) {
 			continue
 		}
 		if err := m.connectAndVerify(ctx, n); err != nil {
@@ -180,6 +222,9 @@ func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
 			m.tun = nil
 		}
 		if err != nil {
+			if errors.Is(err, errModeChanged) {
+				return errModeChanged
+			}
 			logx.Warn("node degraded, drifting", "host", n.HostName, "err", err)
 			m.markBlacklisted(n, err.Error())
 			continue
@@ -247,6 +292,8 @@ func (m *Manager) monitor(ctx context.Context, n *node.Node) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-m.modeCh:
+			return errModeChanged
 		case ev, ok := <-tunEvents:
 			if !ok {
 				return errors.New("tunnel event channel closed")
@@ -326,6 +373,92 @@ func (m *Manager) setState(s State, detail string) {
 	m.stateDetail = detail
 	m.mu.Unlock()
 	logx.Info("state", "state", string(s), "detail", detail)
+}
+
+// --- route mode ---
+
+// selectCandidates narrows the benchmarked pool per the active mode:
+// auto keeps everything, country filters by CountryShort, fixed locks to
+// one node by hostname or IP.
+func (m *Manager) selectCandidates(nodes []*node.Node) []*node.Node {
+	mode, country, fixed := m.routeConfig()
+	switch mode {
+	case "country":
+		wanted := map[string]bool{}
+		for _, c := range strings.Split(country, ",") {
+			c = strings.ToUpper(strings.TrimSpace(c))
+			if c != "" {
+				wanted[c] = true
+			}
+		}
+		var out []*node.Node
+		for _, n := range nodes {
+			if wanted[strings.ToUpper(n.CountryShort)] {
+				out = append(out, n)
+			}
+		}
+		return out
+	case "fixed":
+		for _, n := range nodes {
+			if n.HostName == fixed || n.IP == fixed {
+				return []*node.Node{n}
+			}
+		}
+		return nil
+	default:
+		return nodes
+	}
+}
+
+// isFixedNode reports whether n is the locked fixed-mode node.
+func (m *Manager) isFixedNode(n *node.Node) bool {
+	_, _, fixed := m.routeConfig()
+	return fixed != "" && (n.HostName == fixed || n.IP == fixed)
+}
+
+func (m *Manager) routeConfig() (string, string, string) {
+	m.modeMu.Lock()
+	defer m.modeMu.Unlock()
+	return m.routeMode, m.routeCountry, m.routeNode
+}
+
+// RouteConfig returns the active routing mode, country and node.
+func (m *Manager) RouteConfig() (mode, country, node string) {
+	return m.routeConfig()
+}
+
+// SetRouteConfig validates and applies a new routing mode, persists it
+// and wakes the supervisor so the change takes effect immediately.
+func (m *Manager) SetRouteConfig(mode, country, node string) error {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	country = strings.ToUpper(strings.TrimSpace(country))
+	node = strings.TrimSpace(node)
+	switch mode {
+	case "auto", "country", "fixed":
+	default:
+		return fmt.Errorf("invalid route mode %q (want auto|country|fixed)", mode)
+	}
+	if mode == "country" && country == "" {
+		return errors.New("country mode requires a country code (e.g. JP)")
+	}
+	if mode == "fixed" && node == "" {
+		return errors.New("fixed mode requires a node hostname or IP")
+	}
+
+	m.modeMu.Lock()
+	m.routeMode, m.routeCountry, m.routeNode = mode, country, node
+	m.modeMu.Unlock()
+
+	if err := m.store.SaveRoute(state.Route{Mode: mode, Country: country, Node: node}); err != nil {
+		logx.Warn("save route config failed", "err", err)
+	}
+	logx.Info("route mode set", "mode", mode, "country", country, "node", node)
+
+	select {
+	case m.modeCh <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 // wait sleeps d unless the context dies or a refresh is requested.

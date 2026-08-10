@@ -52,6 +52,25 @@ func (s *Store) LoadBlacklist() (map[string]BlacklistEntry, error) {
 	return bl, nil
 }
 
+// Route holds the routing mode configuration (auto / country / fixed).
+type Route struct {
+	Mode    string `json:"mode"`
+	Country string `json:"country"`
+	Node    string `json:"node"`
+}
+
+func (s *Store) RoutePath() string { return filepath.Join(s.dir, "route.json") }
+
+func (s *Store) SaveRoute(r Route) error { return writeJSON(s.RoutePath(), r) }
+
+func (s *Store) LoadRoute() (Route, error) {
+	var r Route
+	if err := readJSON(s.RoutePath(), &r); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
 // UIAuth holds the web UI secret path. It is persisted so the URL stays
 // stable across restarts.
 type UIAuth struct {

@@ -267,6 +267,56 @@ body {
   text-align: right;
 }
 
+/* ---- route mode ---- */
+.route-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  flex-wrap: wrap;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.seg-btn {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.input-wide { width: 260px; }
+
+.route-msg {
+  font-size: 12px;
+  color: var(--accent);
+  min-height: 1em;
+}
+.route-msg.err { color: var(--error); }
+
+.act-col { width: 64px; text-align: right; }
+.btn-lock {
+  font-size: 11px;
+  padding: 3px 8px;
+  font-family: var(--mono);
+}
+
 /* ---- node table ---- */
 .table-wrap { overflow-x: auto; max-height: 380px; overflow-y: auto; }
 
