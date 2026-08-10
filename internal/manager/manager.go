@@ -23,6 +23,7 @@ import (
 	"conduitvpn/internal/node"
 	"conduitvpn/internal/state"
 	"conduitvpn/internal/tunnel"
+	"conduitvpn/internal/upstream"
 	"conduitvpn/internal/vpngate"
 )
 
@@ -54,6 +55,10 @@ type Manager struct {
 	routeNode    string
 	modeMu       sync.Mutex
 	modeCh       chan struct{}
+
+	// Effective upstream for node fetching (sing-box or legacy)
+	fetchUpstream *config.UpstreamProxy
+	upstreamRT    *upstream.Runtime
 
 	startedAt  time.Time
 	refreshCh  chan struct{}
@@ -127,8 +132,19 @@ func (m *Manager) TriggerFetch() {
 
 // Run is the supervisor loop. It blocks until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) error {
-	if m.cfg.UpstreamProxy != nil {
-		logx.Info("using upstream proxy for node fetch", "type", m.cfg.UpstreamProxy.Type, "addr", m.cfg.UpstreamProxy.Addr)
+	// Resolve the effective upstream: sing-box sources take precedence
+	// over the legacy OPENVPN_UPSTREAM_*/BO_* envs.
+	proxy, rt, err := upstream.Start(ctx, &m.cfg, m.cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("upstream init: %w", err)
+	}
+	m.fetchUpstream = proxy
+	m.upstreamRT = rt
+	if rt != nil {
+		defer rt.Stop()
+	}
+	if m.fetchUpstream != nil {
+		logx.Info("using upstream proxy for node fetch", "type", m.fetchUpstream.Type, "addr", m.fetchUpstream.Addr)
 	}
 	m.loadBlacklist()
 	for {
@@ -177,7 +193,7 @@ func (m *Manager) Run(ctx context.Context) error {
 // kill the daemon.
 func (m *Manager) fetchAndBench(ctx context.Context) []*node.Node {
 	m.setState(StateFetching, "")
-	client := vpngate.NewClient(m.cfg.UpstreamProxy, m.cfg.FetchTimeout)
+	client := vpngate.NewClient(m.fetchUpstream, m.cfg.FetchTimeout)
 	raw, err := client.Fetch(ctx, m.cfg.APIURL)
 	if err != nil {
 		logx.Warn("fetch failed; falling back to cached nodes", "err", err)

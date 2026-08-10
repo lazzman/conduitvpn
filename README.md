@@ -22,6 +22,7 @@
 | **代理鉴权** | 可选 HTTP Basic / SOCKS5 (RFC 1929) 用户名密码 |
 | **隧道内 DNS** | 出站域名解析走固定公共 DNS（默认 8.8.8.8），经 VPN 出口，不依赖容器 resolv.conf |
 | **上游代理拉取** | VPNGate API 被墙/污染时，可经 HTTP/SOCKS5 上游代理拉取节点（支持 Basic 认证） |
+| **sing-box 上游** | 支持 vmess/vless/trojan/ss/hysteria2 等协议的**单个代理 URI** 或**订阅链接**，由内置 sing-box 引擎起本地网关 |
 | **单静态二进制** | `CGO_ENABLED=0` 交叉编译，Docker 镜像 ~21MB，含 openvpn 之外的运行时依赖全内置 |
 
 ---
@@ -194,6 +195,11 @@ curl -X PUT -H 'Content-Type: application/json' \
 | `BO_HTTP_PROXY` | 空 | 本地 HTTP 代理（配合 `BO_USER`/`BO_PASSWORD`） |
 | `BO_USER` / `BO_PASSWORD` | 空 | BO 代理认证凭据 |
 | `OPENVPN_UPSTREAM_USER/PASS` | 空 | 上游代理认证（URL 未带时使用） |
+| `UPSTREAM_SINGBOX_URI` | 空 | 单个代理 URI：`vmess://` `vless://` `trojan://` `ss://` `hy2://`，优先级最高 |
+| `UPSTREAM_SUBSCRIPTION` | 空 | 订阅链接（v2ray base64 / 纯文本 URI / sing-box JSON） |
+| `UPSTREAM_SINGBOX_INDEX` | `0` | 订阅节点序号（可负值取倒数） |
+| `UPSTREAM_SINGBOX_CONFIG` | 空 | sing-box 完整配置（路径或内联 JSON，需含 socks inbound） |
+| `UPSTREAM_SINGBOX_PORT` | `10800` | 本地 socks 监听端口 |
 | **Web UI** | | |
 | `UI_HOST` / `UI_PORT` | `0.0.0.0:8787` | 管理后台 |
 
@@ -245,6 +251,7 @@ make vet     # 静态检查
 - 仅支持 IPv4 隧道（openvpn 默认）；纯 IPv6 环境未验证
 - 固定模式若锁定节点持续不可用，会一直重试该节点（符合"始终锁定"语义），需要用户手动切回
 - 上游代理的可用性取决于代理自身的来源 IP 白名单/网络策略（如 BO 代理仅允许特定网络访问）
+- 订阅仅在启动时拉取一次；sing-box 节点可用性取决于订阅质量
 
 ---
 

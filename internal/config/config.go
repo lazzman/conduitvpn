@@ -27,6 +27,13 @@ type Config struct {
 	// version's env naming). nil = direct.
 	UpstreamProxy *UpstreamProxy
 
+	// sing-box based upstream (overrides UpstreamProxy when set)
+	UpstreamSingboxURI    string
+	UpstreamSubscription  string
+	UpstreamSingboxConfig string
+	UpstreamSingboxIndex  int
+	UpstreamSingboxPort   int
+
 	// Tunnel (M2)
 	ConnectTimeout    time.Duration
 	ProbeSettle       time.Duration
@@ -88,6 +95,12 @@ func Load() Config {
 		LogLevel:         envStr("LOG_LEVEL", "info"),
 
 		UpstreamProxy: parseUpstreamProxy(),
+
+		UpstreamSingboxURI:    envStr("UPSTREAM_SINGBOX_URI", ""),
+		UpstreamSubscription:  envStr("UPSTREAM_SUBSCRIPTION", ""),
+		UpstreamSingboxConfig: envStr("UPSTREAM_SINGBOX_CONFIG", ""),
+		UpstreamSingboxIndex:  envInt("UPSTREAM_SINGBOX_INDEX", 0),
+		UpstreamSingboxPort:   envInt("UPSTREAM_SINGBOX_PORT", 10800),
 
 		ConnectTimeout:    time.Duration(envInt("CONNECT_TIMEOUT_SECONDS", 40)) * time.Second,
 		ProbeSettle:       time.Duration(envInt("PROBE_SETTLE_SECONDS", 2)) * time.Second,
