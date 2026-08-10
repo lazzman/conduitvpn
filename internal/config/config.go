@@ -139,19 +139,19 @@ type UpstreamProxy struct {
 	Pass string
 }
 
-// parseUpstreamProxy mirrors the Python version's env precedence and adds
-// the user's BO_* HTTP proxy: OPENVPN_UPSTREAM_SOCKS → OPENVPN_UPSTREAM_HTTP
-// → BO_HTTP_PROXY (with BO_USER/BO_PASSWORD) → http(s)_proxy.
+// parseUpstreamProxy mirrors the Python version's env precedence:
+// OPENVPN_UPSTREAM_SOCKS → OPENVPN_UPSTREAM_HTTP → http(s)_proxy.
+// HTTP proxies (e.g. a BO-style local proxy) go through the standard
+// http_proxy/HTTP_PROXY vars with credentials embedded in the URL.
 // Values may be URLs (socks5://user:pass@host:port) or bare host:port.
 func parseUpstreamProxy() *UpstreamProxy {
-	for _, cand := range []struct{ env, forcedType, userEnv, passEnv string }{
-		{"OPENVPN_UPSTREAM_SOCKS", "socks5", "", ""},
-		{"OPENVPN_UPSTREAM_HTTP", "http", "", ""},
-		{"BO_HTTP_PROXY", "http", "BO_USER", "BO_PASSWORD"},
-		{"http_proxy", "", "", ""},
-		{"HTTP_PROXY", "", "", ""},
-		{"https_proxy", "", "", ""},
-		{"HTTPS_PROXY", "", "", ""},
+	for _, cand := range []struct{ env, forcedType string }{
+		{"OPENVPN_UPSTREAM_SOCKS", "socks5"},
+		{"OPENVPN_UPSTREAM_HTTP", "http"},
+		{"http_proxy", ""},
+		{"HTTP_PROXY", ""},
+		{"https_proxy", ""},
+		{"HTTPS_PROXY", ""},
 	} {
 		val := strings.TrimSpace(os.Getenv(cand.env))
 		if val == "" {
@@ -162,13 +162,8 @@ func parseUpstreamProxy() *UpstreamProxy {
 			continue
 		}
 		if p.User == "" {
-			if cand.userEnv != "" {
-				p.User = os.Getenv(cand.userEnv)
-				p.Pass = os.Getenv(cand.passEnv)
-			} else {
-				p.User = firstEnv("OPENVPN_UPSTREAM_USER", "OPENVPN_UPSTREAM_USERNAME")
-				p.Pass = firstEnv("OPENVPN_UPSTREAM_PASS", "OPENVPN_UPSTREAM_PASSWORD")
-			}
+			p.User = firstEnv("OPENVPN_UPSTREAM_USER", "OPENVPN_UPSTREAM_USERNAME")
+			p.Pass = firstEnv("OPENVPN_UPSTREAM_PASS", "OPENVPN_UPSTREAM_PASSWORD")
 		}
 		return p
 	}

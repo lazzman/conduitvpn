@@ -84,24 +84,22 @@ func TestParseUpstreamProxyPrecedence(t *testing.T) {
 	}
 }
 
-func TestParseUpstreamProxyBO(t *testing.T) {
+func TestParseUpstreamProxyBOIgnored(t *testing.T) {
+	// BO_* vars must NOT be picked up — an HTTP proxy goes through the
+	// standard http_proxy/HTTP_PROXY vars instead.
 	t.Setenv("OPENVPN_UPSTREAM_SOCKS", "")
 	t.Setenv("OPENVPN_UPSTREAM_HTTP", "")
 	t.Setenv("BO_HTTP_PROXY", "http://10.0.0.5:810")
 	t.Setenv("BO_USER", "bob")
 	t.Setenv("BO_PASSWORD", "s3cret")
-	p := parseUpstreamProxy()
-	if p == nil || p.Type != "http" || p.Addr != "10.0.0.5:810" {
-		t.Fatalf("BO proxy not parsed: %+v", p)
-	}
-	if p.User != "bob" || p.Pass != "s3cret" {
-		t.Fatalf("BO creds not applied: %+v", p)
+	if p := parseUpstreamProxy(); p != nil {
+		t.Fatalf("BO_* should be ignored, got %+v", p)
 	}
 
-	// explicit OPENVPN_UPSTREAM_HTTP still wins over BO
-	t.Setenv("OPENVPN_UPSTREAM_HTTP", "http://1.2.3.4:3128")
-	p = parseUpstreamProxy()
-	if p == nil || p.Addr != "1.2.3.4:3128" {
-		t.Fatalf("precedence broken, got %+v", p)
+	// the same proxy expressed via standard vars (credentials in URL)
+	t.Setenv("http_proxy", "http://bob:s3cret@10.0.0.5:810")
+	p := parseUpstreamProxy()
+	if p == nil || p.Type != "http" || p.Addr != "10.0.0.5:810" || p.User != "bob" || p.Pass != "s3cret" {
+		t.Fatalf("http_proxy with creds failed: %+v", p)
 	}
 }

@@ -192,8 +192,6 @@ curl -X PUT -H 'Content-Type: application/json' \
 | **上游代理（节点拉取，可选）** | |
 | `OPENVPN_UPSTREAM_SOCKS` | 空 | SOCKS5 代理，值可为 `socks5://user:pass@host:port` 或 `host:port` |
 | `OPENVPN_UPSTREAM_HTTP` | 空 | HTTP 代理，同上格式 |
-| `BO_HTTP_PROXY` | 空 | 本地 HTTP 代理（配合 `BO_USER`/`BO_PASSWORD`） |
-| `BO_USER` / `BO_PASSWORD` | 空 | BO 代理认证凭据 |
 | `OPENVPN_UPSTREAM_USER/PASS` | 空 | 上游代理认证（URL 未带时使用） |
 | `UPSTREAM_SINGBOX_URI` | 空 | 单个代理 URI：`vmess://` `vless://` `trojan://` `ss://` `hy2://`，优先级最高 |
 | `UPSTREAM_SUBSCRIPTION` | 空 | 订阅链接（v2ray base64 / 纯文本 URI / sing-box JSON） |
