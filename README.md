@@ -35,8 +35,8 @@ AIMILI_DATA_DIR=/tmp/aimilivpn go run ./cmd/aimilivpn
 
 ## 路线图
 
-- [ ] M1 骨架 + 拉取解析 + 测速 + 持久化（当前）
-- [ ] M2 tunnel（openvpn 进程 + 状态机 + HTTPS 探测 + 漂移）
+- [x] M1 骨架 + 拉取解析 + 测速 + 持久化
+- [x] M2 tunnel（openvpn 进程 + 状态机 + HTTPS 探测 + 漂移）——真机验证通过
 - [ ] M3 proxy 单端口双协议
 - [ ] M4 webui（REST + SSE + auth + 前端品牌重设计）
 - [ ] M5 Dockerfile + install.sh + healthcheck
