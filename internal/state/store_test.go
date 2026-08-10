@@ -1,6 +1,10 @@
 package state
 
-import "testing"
+import (
+	"encoding/hex"
+	"os"
+	"testing"
+)
 
 func TestEnsureAuthGeneratesCreds(t *testing.T) {
 	s := NewStore(t.TempDir())
@@ -8,7 +12,7 @@ func TestEnsureAuthGeneratesCreds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(u) != 12 || len(p) != 12 {
+	if len(u) != 12 || len(p) != 16 {
 		t.Fatalf("cred length: user=%d pass=%d", len(u), len(p))
 	}
 	// second call: stable, no regeneration
@@ -20,7 +24,7 @@ func TestEnsureAuthGeneratesCreds(t *testing.T) {
 		t.Fatalf("should not regenerate: %q %q", u2, p2)
 	}
 	auth, _ := s.LoadAuth()
-	if auth.Username != u || auth.Password != p {
+	if auth.Username != u || auth.Password != "" || !auth.VerifyPassword(p) {
 		t.Fatalf("persisted creds mismatch")
 	}
 	if len(auth.SecretPath) != 24 {
@@ -45,8 +49,79 @@ func TestEnsureAuthWithDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auth.Username != "admin" || auth.Password != "demo" {
+	if auth.Username != "admin" || auth.Password != "" || !auth.VerifyPassword("demo") {
 		t.Fatalf("existing credentials were overwritten: %+v", auth)
+	}
+}
+
+func TestLegacyAuthMigratesWithoutChangingPassword(t *testing.T) {
+	s := NewStore(t.TempDir())
+	legacy := UIAuth{SecretPath: "0123456789abcdef01234567", Username: "admin", Password: "correct horse battery staple"}
+	if err := writeJSON(s.AuthPath(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnsureAuthConfigured("", "", false); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := s.LoadAuth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.Password != "" || !auth.VerifyPassword("correct horse battery staple") {
+		t.Fatalf("legacy credential was not migrated: %+v", auth)
+	}
+}
+
+func TestPBKDF2SHA256RFCVector(t *testing.T) {
+	got := hex.EncodeToString(pbkdf2SHA256([]byte("password"), []byte("salt"), 1, 32))
+	const want = "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
+	if got != want {
+		t.Fatalf("PBKDF2 result = %s, want %s", got, want)
+	}
+}
+
+func TestStateFilesArePrivate(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	if err := s.SaveRoute(Route{Mode: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(s.RoutePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("route mode = %o, want 600", got)
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("data dir mode = %o, want 700", got)
+	}
+}
+
+func TestSecureDirRepairsExistingPermissions(t *testing.T) {
+	dir := t.TempDir()
+	nested := dir + "/nested"
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := nested + "/old.json"
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SecureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("file permission = %v, err = %v", info.Mode(), err)
+	}
+	info, err = os.Stat(nested)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("directory permission = %v, err = %v", info.Mode(), err)
 	}
 }
 

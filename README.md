@@ -105,24 +105,36 @@ internal/
 ### 一键部署（Docker）
 
 ```bash
+UI_USER=admin \
+UI_PASSWORD='至少16字符的随机密码' \
+LOCAL_PROXY_USER=proxy \
+LOCAL_PROXY_PASS='至少16字符的随机密码' \
+UI_TLS_CERT=/绝对路径/fullchain.pem \
+UI_TLS_KEY=/绝对路径/privkey.pem \
 bash install.sh
 # 可选：hy2 入站
-HY2_PORT=7929 HY2_PASSWORD=你的密码 bash install.sh
+HY2_PORT=7929 HY2_PASSWORD='至少16字符的随机密码' bash install.sh
 ```
 
-脚本会：构建多阶段镜像 → 以 `NET_ADMIN + /dev/net/tun` 启动容器 → 打印后台地址。
+脚本会：构建多阶段镜像 → 以最小 `NET_ADMIN` 能力、只读根文件系统和 `/dev/net/tun` 启动容器 → 打印 HTTPS 后台地址。
 
 ### 手动运行
 
 ```bash
 docker run -d --name conduitvpn \
   --restart unless-stopped \
-  --cap-add=NET_ADMIN --device=/dev/net/tun \
+  --cap-drop=ALL --cap-add=NET_ADMIN --security-opt=no-new-privileges \
+  --read-only --tmpfs /tmp --device=/dev/net/tun \
   -v /data/conduitvpn:/data/conduitvpn \
+  -v /etc/letsencrypt/live/example/fullchain.pem:/run/conduitvpn-tls/cert.pem:ro \
+  -v /etc/letsencrypt/live/example/privkey.pem:/run/conduitvpn-tls/key.pem:ro \
   -p 0.0.0.0:8787:8787 \
   -p 127.0.0.1:7928:7928 \
   -p 0.0.0.0:7929:7929/udp \   # 可选 hy2
-  -e HY2_PORT=7929 -e HY2_PASSWORD=xxx \
+  -e UI_HOST=0.0.0.0 -e UI_USER=admin -e UI_PASSWORD='至少16字符的随机密码' \
+  -e UI_TLS_CERT=/run/conduitvpn-tls/cert.pem -e UI_TLS_KEY=/run/conduitvpn-tls/key.pem \
+  -e LOCAL_PROXY_HOST=0.0.0.0 -e LOCAL_PROXY_USER=proxy -e LOCAL_PROXY_PASS='至少16字符的随机密码' \
+  -e HY2_PORT=7929 -e HY2_PASSWORD='至少16字符的随机密码' \
   ghcr.io/sarices/conduitvpn:latest
 ```
 
@@ -146,11 +158,12 @@ demo 模式只启动 Web UI，并使用模拟节点、状态、日志和路由�
 
 ### Web 管理后台
 
-访问 `http://<你的IP>:8787/<安全后缀>/` 进行登录。鉴权与 Python 原版一致：
+访问 `https://<你的IP>:8787/<安全后缀>/` 进行登录。生产部署必须提供 TLS 证书和显式管理员凭据：
 
-- **随机账号密码**：首次启动生成并保存在 `ui_auth.json`（启动日志会打印一次），也可用 `UI_USER` / `UI_PASSWORD` 环境变量覆盖后重启
+- **显式管理员凭据**：首次生产启动必须设置 `UI_USER` / `UI_PASSWORD`（密码至少 16 字符）；密码以加盐 PBKDF2 哈希保存。旧版 `ui_auth.json` 会自动迁移。
+- **TLS 强制**：非回环 `UI_HOST` 必须配置 `UI_TLS_CERT` 与 `UI_TLS_KEY`；容器部署需将证书只读挂载进容器。
 - **安全后缀**：访问路径为随机 24 位十六进制，root 返回 404，不泄露入口
-- **会话**：登录后下发 HttpOnly 会话 Cookie（30 天），服务端内存会话
+- **会话**：登录后下发 HttpOnly、SameSite=Strict 会话 Cookie（12 小时），服务端内存会话
 - **退出**：面板内有登出入口（`POST /api/logout`）
 
 ### 本地代理
@@ -214,12 +227,12 @@ curl -X PUT -d '{"mode":"auto"}' http://127.0.0.1:8787/<secret>/api/route
 | **路由模式** | | |
 | `ROUTE_MODE` / `ROUTE_COUNTRY` / `ROUTE_NODE` | `auto` / 空 | 启动默认（UI 设置持久化优先） |
 | **代理** | | |
-| `LOCAL_PROXY_HOST` / `LOCAL_PROXY_PORT` | `0.0.0.0:7928` | HTTP+SOCKS5 代理 |
-| `LOCAL_PROXY_USER/PASS` | 空 | 代理鉴权（可选） |
+| `LOCAL_PROXY_HOST` / `LOCAL_PROXY_PORT` | `127.0.0.1:7928` | HTTP+SOCKS5 代理；非回环监听必须认证 |
+| `LOCAL_PROXY_USER/PASS` | 空 | 非回环监听时必填，密码至少 16 字符 |
 | `DNS_SERVER` | `8.8.8.8` | 隧道内 DNS |
 | **hy2 入站** | | |
 | `HY2_PORT` | `0` | hysteria2 UDP 端口（0=关闭） |
-| `HY2_PASSWORD` | 空 | hy2 密码（启用时必填） |
+| `HY2_PASSWORD` | 空 | hy2 密码（启用时必填且至少 16 字符） |
 | `HY2_OBFS_PASSWORD` | 空 | 可选 salamander 混淆 |
 | **上游代理（节点拉取，可选）** | | |
 | `OPENVPN_UPSTREAM_SOCKS` | 空 | SOCKS5 代理 |
@@ -229,8 +242,9 @@ curl -X PUT -d '{"mode":"auto"}' http://127.0.0.1:8787/<secret>/api/route
 | `UPSTREAM_SUBSCRIPTION` | 空 | 订阅链接（v2ray base64 / 纯文本 / sing-box JSON） |
 | `UPSTREAM_SINGBOX_INDEX` / `_PORT` | `0` / `10800` | 订阅节点序号 / 本地监听端口 |
 | **Web UI** | | |
-| `UI_HOST` / `UI_PORT` | `0.0.0.0:8787` | 管理后台 |
-| `UI_USER` / `UI_PASSWORD` | 空（自动生成） | 后台登录凭据，显式设置后覆盖自动生成的 |
+| `UI_HOST` / `UI_PORT` | `127.0.0.1:8787` | 管理后台；非回环监听必须 TLS |
+| `UI_USER` / `UI_PASSWORD` | 必填（首次生产启动） | 后台登录凭据，密码至少 16 字符 |
+| `UI_TLS_CERT` / `UI_TLS_KEY` | 空 | 非回环管理后台的 TLS 证书与私钥路径，必须同时设置 |
 
 ---
 

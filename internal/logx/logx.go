@@ -76,14 +76,27 @@ func emit(l Level, lvl, msg string, kv ...any) {
 	os.Stdout.Write(append(line, '\n'))
 }
 
-// Subscribe returns a channel that receives every log entry (best
-// effort, drops when the consumer is slow). Used by the web UI SSE.
-func Subscribe() <-chan map[string]any {
+// Subscribe returns a channel plus an idempotent cleanup function. Callers
+// must unsubscribe when an SSE client disconnects so abandoned channels do
+// not accumulate indefinitely.
+func Subscribe() (<-chan map[string]any, func()) {
 	ch := make(chan map[string]any, 256)
 	mu.Lock()
 	subs = append(subs, ch)
 	mu.Unlock()
-	return ch
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			mu.Lock()
+			defer mu.Unlock()
+			for i, sub := range subs {
+				if sub == ch {
+					subs = append(subs[:i], subs[i+1:]...)
+					return
+				}
+			}
+		})
+	}
 }
 
 // Recent returns the last n ring entries (for the future SSE log stream).

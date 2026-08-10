@@ -27,6 +27,7 @@ func (s *Server) handleHTTP(client net.Conn, br *bufio.Reader) {
 			"Proxy-Authenticate: Basic realm=\"conduitvpn\"\r\nContent-Length: 0\r\n\r\n"))
 		return
 	}
+	_ = client.SetReadDeadline(time.Time{})
 
 	target := req.URL.Host
 	if target == "" {

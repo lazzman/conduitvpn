@@ -8,10 +8,19 @@ services:
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - ./data:/data/conduitvpn
+      - ${UI_TLS_CERT_HOST:?set UI_TLS_CERT_HOST in .env}:/run/conduitvpn-tls/cert.pem:ro
+      - ${UI_TLS_KEY_HOST:?set UI_TLS_KEY_HOST in .env}:/run/conduitvpn-tls/key.pem:ro
     env_file:
       - .env
     ports:

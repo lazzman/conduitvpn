@@ -26,7 +26,10 @@ func buildSingBoxConfig(outbound map[string]any, port int) map[string]any {
 // writeConfig persists the sing-box config JSON and returns its path.
 func writeConfig(dataDir string, cfg map[string]any) (string, error) {
 	dir := filepath.Join(dataDir, "singbox")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, "config.json")

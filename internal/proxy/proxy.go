@@ -84,7 +84,7 @@ func (s *Server) acceptLoop(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			if s.closed {
+			if s.isClosed() {
 				return
 			}
 			logx.Warn("proxy accept failed", "err", err)
@@ -95,7 +95,12 @@ func (s *Server) acceptLoop(ln net.Listener) {
 			_ = tcp.SetKeepAlive(true)
 			_ = tcp.SetKeepAlivePeriod(60 * time.Second)
 		}
-		s.limit <- struct{}{} // soft cap to bound FD usage
+		select {
+		case s.limit <- struct{}{}:
+		default:
+			_ = conn.Close()
+			continue
+		}
 		go func() {
 			defer func() { <-s.limit }()
 			s.handle(conn)
@@ -105,6 +110,7 @@ func (s *Server) acceptLoop(ln net.Listener) {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	br := bufio.NewReaderSize(conn, 32*1024)
 	first, err := br.Peek(1)
 	if err != nil {
@@ -116,4 +122,10 @@ func (s *Server) handle(conn net.Conn) {
 	default:
 		s.handleHTTP(conn, br)
 	}
+}
+
+func (s *Server) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }

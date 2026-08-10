@@ -4,12 +4,14 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Config struct {
@@ -66,6 +68,8 @@ type Config struct {
 	UIPort     int
 	UIUser     string
 	UIPassword string
+	UITLSCert  string
+	UITLSKey   string
 
 	// Route mode (M6)
 	RouteMode    string
@@ -127,18 +131,19 @@ func Load() Config {
 		OpenVPNAuthUser:   envStr("OPENVPN_AUTH_USER", "vpn"),
 		OpenVPNAuthPass:   envStr("OPENVPN_AUTH_PASS", "vpn"),
 
-		LocalProxyHost: envStr("LOCAL_PROXY_HOST", "0.0.0.0"),
+		LocalProxyHost: envStr("LOCAL_PROXY_HOST", "127.0.0.1"),
 		LocalProxyPort: envInt("LOCAL_PROXY_PORT", 7928),
 		ProxyUser:      envStr("LOCAL_PROXY_USER", ""),
 		ProxyPass:      envStr("LOCAL_PROXY_PASS", ""),
 		ProxyMaxConns:  envInt("LOCAL_PROXY_MAX_CONNECTIONS", 512),
 		DNSServer:      envStr("DNS_SERVER", "8.8.8.8"),
 
-		UIHost: envStr("UI_HOST", "0.0.0.0"),
-		UIPort: envInt("UI_PORT", 8787),
-		UIUser: envStr("UI_USER", "admin"),
-		// 空则首次启动自动生成随机密码并持久化(启动日志可见)
+		UIHost:     envStr("UI_HOST", "127.0.0.1"),
+		UIPort:     envInt("UI_PORT", 8787),
+		UIUser:     envStr("UI_USER", ""),
 		UIPassword: envStr("UI_PASSWORD", ""),
+		UITLSCert:  envStr("UI_TLS_CERT", ""),
+		UITLSKey:   envStr("UI_TLS_KEY", ""),
 
 		RouteMode:    envStr("ROUTE_MODE", "auto"),
 		RouteCountry: envStr("ROUTE_COUNTRY", ""),
@@ -146,6 +151,57 @@ func Load() Config {
 
 		LatencyInterval: time.Duration(envInt("LATENCY_INTERVAL_SECONDS", 10)) * time.Second,
 	}
+}
+
+// Validate rejects insecure listener and credential combinations before any
+// network service starts. Existing UI credentials are handled by state.Store.
+func (c Config) Validate() error {
+	if err := validPort("UI_PORT", c.UIPort, false); err != nil {
+		return err
+	}
+	if err := validPort("LOCAL_PROXY_PORT", c.LocalProxyPort, false); err != nil {
+		return err
+	}
+	if err := validPort("HY2_PORT", c.HY2Port, true); err != nil {
+		return err
+	}
+	if (c.UITLSCert == "") != (c.UITLSKey == "") {
+		return fmt.Errorf("UI_TLS_CERT and UI_TLS_KEY must be configured together")
+	}
+	if !isLoopbackBind(c.UIHost) && (c.UITLSCert == "" || c.UITLSKey == "") {
+		return fmt.Errorf("non-loopback UI_HOST requires UI_TLS_CERT and UI_TLS_KEY")
+	}
+	if !isLoopbackBind(c.LocalProxyHost) {
+		if c.ProxyUser == "" || c.ProxyPass == "" {
+			return fmt.Errorf("non-loopback LOCAL_PROXY_HOST requires LOCAL_PROXY_USER and LOCAL_PROXY_PASS")
+		}
+		if utf8.RuneCountInString(c.ProxyPass) < 16 {
+			return fmt.Errorf("LOCAL_PROXY_PASS must contain at least 16 characters")
+		}
+	}
+	if c.HY2Port != 0 && utf8.RuneCountInString(c.HY2Password) < 16 {
+		return fmt.Errorf("HY2_PASSWORD must contain at least 16 characters when hy2 is enabled")
+	}
+	if c.ProxyMaxConns < 1 || c.ProxyMaxConns > 4096 {
+		return fmt.Errorf("LOCAL_PROXY_MAX_CONNECTIONS must be between 1 and 4096")
+	}
+	return nil
+}
+
+func validPort(name string, port int, zeroAllowed bool) error {
+	if (zeroAllowed && port == 0) || (port >= 1 && port <= 65535) {
+		return nil
+	}
+	return fmt.Errorf("%s must be a valid TCP/UDP port", name)
+}
+
+func isLoopbackBind(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // DemoDataDir returns the isolated data directory used by --demo. An

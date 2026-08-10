@@ -40,7 +40,10 @@ func Start(ctx context.Context, dataDir string, cfg Config) (*upstream.Runner, e
 	}
 
 	dir := filepath.Join(dataDir, "hy2")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, err
 	}
 	certPath := filepath.Join(dir, "cert.pem")

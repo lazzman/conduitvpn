@@ -9,15 +9,16 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,7 @@ var versionedAssets = []string{
 	"static/login.html",
 	"static/styles.css",
 	"static/app.js",
+	"static/login.js",
 }
 
 // assetVersion busts proxy caches. It is derived from the embedded assets so
@@ -57,19 +59,33 @@ func staticAssetVersion(fsys fs.FS) string {
 	return hex.EncodeToString(h.Sum(nil)[:8])
 }
 
-const sessionTTL = 30 * 24 * time.Hour
+const (
+	sessionTTL       = 12 * time.Hour
+	maxSessions      = 256
+	maxSSEClients    = 32
+	maxLoginFailures = 5
+	loginWindow      = 15 * time.Minute
+)
+
+type loginAttempt struct {
+	failed int
+	until  time.Time
+}
 
 type Server struct {
 	cfg    config.Config
 	store  *state.Store
 	mgr    *manager.Manager
 	secret string
+	tls    bool
 
 	ln  net.Listener
 	srv *http.Server
 
 	mu       sync.Mutex
-	sessions map[string]time.Time // session token → expiry (in-memory, like the original)
+	sessions map[string]time.Time
+	attempts map[string]loginAttempt
+	sseLimit chan struct{}
 
 	api    *http.ServeMux
 	static http.Handler
@@ -86,28 +102,13 @@ func New(cfg config.Config, store *state.Store, mgr *manager.Manager) *Server {
 		mgr:      mgr,
 		secret:   store.SecretPath(),
 		sessions: map[string]time.Time{},
+		attempts: map[string]loginAttempt{},
+		sseLimit: make(chan struct{}, maxSSEClients),
 		api:      http.NewServeMux(),
 		static:   http.FileServer(http.FS(sub)),
 	}
 	s.registerAPI()
 
-	// env credentials override the persisted ones (like editing
-	// ui_auth.json, but from the environment). Only explicitly-set env
-	// vars override — config defaults must not clobber generated creds.
-	if auth, err := store.LoadAuth(); err == nil {
-		changed := false
-		if v := os.Getenv("UI_USER"); v != "" && v != auth.Username {
-			auth.Username = v
-			changed = true
-		}
-		if v := os.Getenv("UI_PASSWORD"); v != "" && v != auth.Password {
-			auth.Password = v
-			changed = true
-		}
-		if changed {
-			_ = store.SaveAuth(auth)
-		}
-	}
 	return s
 }
 
@@ -133,12 +134,29 @@ func (s *Server) Start() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		s.securityHeaders(w)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/", s.handleAll)
 
-	s.srv = &http.Server{Handler: mux}
+	s.srv = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+	}
+	if s.cfg.UITLSCert != "" {
+		cert, err := tls.LoadX509KeyPair(s.cfg.UITLSCert, s.cfg.UITLSKey)
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("load UI TLS certificate: %w", err)
+		}
+		s.tls = true
+		s.srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
+		go func() { _ = s.srv.ServeTLS(ln, "", "") }()
+		return nil
+	}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -153,6 +171,7 @@ func (s *Server) Close() error {
 // handleAll routes every request under the secret path. The demo root is an
 // intentional exception so a shared preview URL can be opened directly.
 func (s *Server) handleAll(w http.ResponseWriter, r *http.Request) {
+	s.securityHeaders(w)
 	if s.cfg.Demo && r.URL.Path == "/" {
 		http.Redirect(w, r, "/"+s.secret+"/", http.StatusFound)
 		return
@@ -222,12 +241,16 @@ func (s *Server) validatePath(w http.ResponseWriter, r *http.Request) string {
 // --- auth ---
 
 func (s *Server) isAuthorized(r *http.Request) bool {
-	c, err := r.Cookie("session")
+	c, err := r.Cookie(s.sessionCookieName())
 	if err != nil {
 		return false
 	}
 	s.mu.Lock()
 	exp, ok := s.sessions[c.Value]
+	if ok && !exp.After(time.Now()) {
+		delete(s.sessions, c.Value)
+		ok = false
+	}
 	s.mu.Unlock()
 	return ok && exp.After(time.Now())
 }
@@ -237,43 +260,69 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
 		return
 	}
+	remote := clientIP(r)
+	if s.loginBlocked(remote) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "登录失败，请稍后重试"})
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeJSON(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
 	auth, err := s.store.LoadAuth()
-	if err != nil || auth.Username == "" || auth.Password == "" {
+	if err != nil || auth.Username == "" || auth.PasswordHash == "" || auth.PasswordSalt == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "auth not initialized"})
 		return
 	}
 	userOK := subtle.ConstantTimeCompare([]byte(body.Username), []byte(auth.Username)) == 1
-	passOK := subtle.ConstantTimeCompare([]byte(body.Password), []byte(auth.Password)) == 1
+	passOK := auth.VerifyPassword(body.Password)
 	if !userOK || !passOK {
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "用户名或密码不正确，请重新输入"})
+		s.recordLoginFailure(remote)
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "登录失败"})
 		return
 	}
 
-	token := randToken()
+	token, err := randToken()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "登录失败"})
+		return
+	}
 	s.mu.Lock()
+	s.pruneSessionsLocked(time.Now())
+	if len(s.sessions) >= maxSessions {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "会话容量已满"})
+		return
+	}
 	s.sessions[token] = time.Now().Add(sessionTTL)
+	delete(s.attempts, remote)
 	s.mu.Unlock()
+	cookieName := "conduitvpn_session"
+	if s.tls {
+		cookieName = "__Secure-conduitvpn-session"
+	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
+		Name:     cookieName,
 		Value:    token,
 		Path:     "/" + s.secret + "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   s.tls,
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(sessionTTL.Seconds()),
 	})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) apiLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie("session"); err == nil {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		return
+	}
+	if c, err := r.Cookie(s.sessionCookieName()); err == nil {
 		s.mu.Lock()
 		delete(s.sessions, c.Value)
 		s.mu.Unlock()
@@ -281,10 +330,82 @@ func (s *Server) apiLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func randToken() string {
+func (s *Server) sessionCookieName() string {
+	if s.tls {
+		return "__Secure-conduitvpn-session"
+	}
+	return "conduitvpn_session"
+}
+
+func randToken() (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func (s *Server) securityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	if s.tls {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("multiple JSON values")
+	}
+	return nil
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func (s *Server) loginBlocked(remote string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.attempts[remote]
+	return ok && a.failed >= maxLoginFailures && a.until.After(time.Now())
+}
+
+func (s *Server) recordLoginFailure(remote string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.attempts[remote]
+	if a.until.Before(time.Now()) {
+		a = loginAttempt{}
+	}
+	a.failed++
+	if a.failed >= maxLoginFailures {
+		a.until = time.Now().Add(loginWindow)
+	}
+	if len(s.attempts) < 4096 || s.attempts[remote].failed > 0 {
+		s.attempts[remote] = a
+	}
+}
+
+func (s *Server) pruneSessionsLocked(now time.Time) {
+	for token, exp := range s.sessions {
+		if !exp.After(now) {
+			delete(s.sessions, token)
+		}
+	}
 }
 
 // --- pages ---
@@ -360,8 +481,8 @@ func (s *Server) apiRoute(w http.ResponseWriter, r *http.Request) {
 			Country string `json:"country"`
 			Node    string `json:"node"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json: " + err.Error()})
+		if err := decodeJSON(w, r, &body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 			return
 		}
 		if err := s.mgr.SetRouteConfig(body.Mode, body.Country, body.Node); err != nil {
@@ -403,6 +524,13 @@ func (s *Server) apiLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiLogStream(w http.ResponseWriter, r *http.Request) {
+	select {
+	case s.sseLimit <- struct{}{}:
+		defer func() { <-s.sseLimit }()
+	default:
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many log streams"})
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -412,7 +540,8 @@ func (s *Server) apiLogStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub := logx.Subscribe()
+	sub, unsubscribe := logx.Subscribe()
+	defer unsubscribe()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 

@@ -147,3 +147,18 @@ func TestRouteConfigFileWinsOverEnv(t *testing.T) {
 	}
 	_ = filepath.Join(dir) // keep filepath import meaningful
 }
+
+func TestPrepareFilesRevalidatesCachedProfile(t *testing.T) {
+	m := testManager(t, "auto", "", "")
+	n := &node.Node{
+		HostName: "vpn-test",
+		IP:       "8.8.8.8",
+		ConfigText: "client\n" +
+			"dev tun\n" +
+			"remote 8.8.8.8 1194 udp\n" +
+			"script-security 2\n",
+	}
+	if _, _, err := m.prepareFiles(n); err == nil {
+		t.Fatal("unsafe cached profile should not be written")
+	}
+}

@@ -152,11 +152,18 @@ function populateRouteSelects() {
   const seen = {};
   nodes.forEach((n) => { if (n.country_short) seen[n.country_short] = true; });
   const codes = Object.keys(seen).sort();
-  cc.innerHTML = codes.map((c) => {
+  cc.replaceChildren();
+  codes.forEach((c) => {
     const node = nodes.find((n) => String(n.country_short || "").toUpperCase() === c);
     const name = countryRegionName(c, node?.country_long);
-    return `<button type="button" class="cc-chip" data-code="${c}" title="${name}">${c} · ${name}</button>`;
-  }).join("");
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "cc-chip";
+    chip.dataset.code = c;
+    chip.title = name;
+    chip.textContent = `${c} · ${name}`;
+    cc.appendChild(chip);
+  });
   cc.querySelectorAll(".cc-chip").forEach((chip) => {
     chip.addEventListener("click", () => chip.classList.toggle("selected"));
   });
@@ -167,10 +174,19 @@ function populateRouteSelects() {
   const rows = nodes
     .map((n) => ({ n, lat: n.tested && n.latency_ms > 0 ? n.latency_ms : Infinity }))
     .sort((a, b) => a.lat - b.lat);
-  nn.innerHTML = '<option value="">选择节点…</option>' + rows.map(({ n, lat }) => {
+  nn.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "选择节点…";
+  nn.appendChild(empty);
+  rows.forEach(({ n, lat }) => {
     const latTxt = lat === Infinity ? "—" : `${lat}ms`;
-    return `<option value="${n.host_name}" data-ip="${n.ip}">${n.host_name} · ${latTxt} · ping ${n.ping ?? "—"}</option>`;
-  }).join("");
+    const option = document.createElement("option");
+    option.value = n.host_name || "";
+    option.dataset.ip = n.ip || "";
+    option.textContent = `${n.host_name || ""} · ${latTxt} · ping ${n.ping ?? "—"}`;
+    nn.appendChild(option);
+  });
   if (routeCfg.mode === "fixed" && routeCfg.node) nn.value = routeCfg.node;
 }
 
@@ -195,10 +211,14 @@ function renderTable() {
   $("node-count").textContent = rows.length;
 
   const tbody = document.querySelector("#node-table tbody");
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
   if (rows.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="8" class="empty-note">暂无节点 — 点击右上角「更新节点」拉取</td>`;
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    td.className = "empty-note";
+    td.textContent = "暂无节点 — 点击右上角「更新节点」拉取";
+    tr.appendChild(td);
     tbody.appendChild(tr);
     return;
   }
@@ -211,15 +231,36 @@ function renderTable() {
     const countryCode = String(n.country_short || "??").toUpperCase();
     const country = countryRegionName(n.country_short, n.country_long);
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="num ${latCls}">${lat}</td>
-      <td class="country-cell" title="${country}"><span class="country-code">${countryCode}</span><span class="country-name">${country}</span></td>
-      <td class="host-cell" title="${n.host_name}">${n.host_name}</td>
-      <td class="ip-cell" title="${n.ip}">${n.ip}</td>
-      <td class="proto-cell">${n.remote_proto || "udp"}</td>
-      <td class="num">${n.score ?? "—"}</td>
-      <td class="num">${n.ping ?? "—"}</td>
-      <td class="act-col"><button class="btn btn-ghost btn-lock" data-host="${n.host_name}" title="锁定此节点（固定 IP 模式）">锁定</button></td>`;
+    const cell = (className, value, title = "") => {
+      const td = document.createElement("td");
+      td.className = className;
+      td.textContent = value;
+      if (title) td.title = title;
+      return td;
+    };
+    tr.appendChild(cell(`num ${latCls}`, lat));
+    const countryCell = cell("country-cell", "", country);
+    const code = document.createElement("span");
+    code.className = "country-code";
+    code.textContent = countryCode;
+    const countryName = document.createElement("span");
+    countryName.className = "country-name";
+    countryName.textContent = country;
+    countryCell.append(code, countryName);
+    tr.appendChild(countryCell);
+    tr.appendChild(cell("host-cell", n.host_name || "", n.host_name || ""));
+    tr.appendChild(cell("ip-cell", n.ip || "", n.ip || ""));
+    tr.appendChild(cell("proto-cell", n.remote_proto || "udp"));
+    tr.appendChild(cell("num", String(n.score ?? "—")));
+    tr.appendChild(cell("num", String(n.ping ?? "—")));
+    const action = cell("act-col", "");
+    const lock = document.createElement("button");
+    lock.className = "btn btn-ghost btn-lock";
+    lock.dataset.host = n.host_name || "";
+    lock.title = "锁定此节点（固定 IP 模式）";
+    lock.textContent = "锁定";
+    action.appendChild(lock);
+    tr.appendChild(action);
     tbody.appendChild(tr);
   }
 
@@ -455,7 +496,11 @@ function appendLog(entry) {
     .filter(([k]) => k !== "ts" && k !== "lvl" && k !== "msg")
     .map(([k, v]) => `${k}=${v}`)
     .join(" ");
-  line.innerHTML = `<span class="t">${ts}</span> [${lvl.toUpperCase()}] ${entry.msg || ""}${kv ? " " + kv : ""}`;
+  const time = document.createElement("span");
+  time.className = "t";
+  time.textContent = ts;
+  line.appendChild(time);
+  line.append(` [${lvl.toUpperCase()}] ${entry.msg || ""}${kv ? " " + kv : ""}`);
   view.appendChild(line);
   if (view.childNodes.length > 800) view.removeChild(view.firstChild);
   if (follow && atBottom) view.scrollTop = view.scrollHeight;
@@ -463,10 +508,13 @@ function appendLog(entry) {
 
 function renderLogs(list) {
   const view = $("log-view");
-  view.innerHTML = "";
+  view.replaceChildren();
   const visible = list.filter((e) => logLevel === "all" || LEVELS[e.lvl || "info"] >= LEVELS[logLevel]);
   if (visible.length === 0) {
-    view.innerHTML = `<span class="empty-note">暂无日志</span>`;
+    const empty = document.createElement("span");
+    empty.className = "empty-note";
+    empty.textContent = "暂无日志";
+    view.appendChild(empty);
     return;
   }
   for (const e of visible) appendLog(e);
@@ -490,7 +538,7 @@ document.querySelectorAll("#log-chips .chip").forEach((chip) => {
 });
 
 $("btn-clear-log").addEventListener("click", () => {
-  $("log-view").innerHTML = "";
+  $("log-view").replaceChildren();
 });
 
 $("btn-scroll").addEventListener("click", () => {

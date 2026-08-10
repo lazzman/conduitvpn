@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,7 @@ func TestStaticAssetVersionStable(t *testing.T) {
 		"static/login.html": &fstest.MapFile{Data: []byte("login")},
 		"static/styles.css": &fstest.MapFile{Data: []byte("styles")},
 		"static/app.js":     &fstest.MapFile{Data: []byte("app")},
+		"static/login.js":   &fstest.MapFile{Data: []byte("login script")},
 	}
 
 	first := staticAssetVersion(fsys)
@@ -36,6 +38,7 @@ func TestStaticAssetVersionChangesWithContent(t *testing.T) {
 		"static/login.html": &fstest.MapFile{Data: []byte("login")},
 		"static/styles.css": &fstest.MapFile{Data: []byte("styles")},
 		"static/app.js":     &fstest.MapFile{Data: []byte("app")},
+		"static/login.js":   &fstest.MapFile{Data: []byte("login script")},
 	}
 
 	before := staticAssetVersion(fsys)
@@ -67,6 +70,18 @@ func TestEmbeddedRegionLabels(t *testing.T) {
 	} {
 		if !strings.Contains(string(app), want) {
 			t.Errorf("app.js is missing %q", want)
+		}
+	}
+}
+
+func TestEmbeddedScriptsDoNotUseHTMLInjection(t *testing.T) {
+	for _, name := range []string{"static/app.js", "static/login.js"} {
+		data, err := staticFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "innerHTML") || strings.Contains(string(data), "insertAdjacentHTML") {
+			t.Fatalf("%s contains an HTML injection API", name)
 		}
 	}
 }
@@ -107,6 +122,41 @@ func TestDemoLoginShowsCredentialsOnlyInDemo(t *testing.T) {
 	serveLogin(production, request, false)
 	if strings.Contains(production.Body.String(), "演示账号：admin") {
 		t.Fatal("production login leaked demo credential hint")
+	}
+}
+
+func TestLoginUsesPrivateHashedCredentialsAndStrictCookie(t *testing.T) {
+	dir := t.TempDir()
+	store := state.NewStore(dir)
+	password := "0123456789abcdef"
+	if err := store.EnsureAuthConfigured("admin", password, false); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DataDir: dir}
+	s := New(cfg, store, manager.New(cfg))
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"username":"admin","password":"0123456789abcdef"}`))
+	r.RemoteAddr = "127.0.0.1:12345"
+	w := httptest.NewRecorder()
+	s.apiLogin(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("login status = %d, body = %s", w.Code, w.Body.String())
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode || cookies[0].MaxAge != int(sessionTTL.Seconds()) {
+		t.Fatalf("unexpected session cookie: %+v", cookies)
+	}
+}
+
+func TestSecurityHeadersAreSet(t *testing.T) {
+	s := testServer(t, false)
+	r := httptest.NewRequest(http.MethodGet, "/"+s.SecretPath()+"/", nil)
+	w := httptest.NewRecorder()
+	s.handleAll(w, r)
+	if got := w.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("CSP header is missing")
+	}
+	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("X-Frame-Options = %q", got)
 	}
 }
 

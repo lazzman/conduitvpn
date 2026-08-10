@@ -31,10 +31,14 @@ func main() {
 		cfg.Demo = true
 		cfg.DataDir = config.DemoDataDir()
 	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintln(os.Stderr, "invalid configuration:", err)
+		os.Exit(2)
+	}
 	logx.Init(cfg.LogLevel)
 
-	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
-		logx.Error("cannot create data dir", "dir", cfg.DataDir, "err", err)
+	if err := state.SecureDir(cfg.DataDir); err != nil {
+		logx.Error("cannot secure data dir", "dir", cfg.DataDir, "err", err)
 		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -42,13 +46,15 @@ func main() {
 
 	store := state.NewStore(cfg.DataDir)
 
-	// Web UI 凭据：首次运行生成随机账号/密码并持久化到 ui_auth.json。
-	var genUser, genPass string
+	// Demo credentials are explicit, while production requires configured
+	// credentials on first boot and migrates existing legacy files in place.
 	var err error
+	demoUser, demoPass := "", ""
 	if *demo {
-		genUser, genPass, err = store.EnsureAuthWithDefaults(demoCredential("UI_USER", "admin"), demoCredential("UI_PASSWORD", "demo"))
+		demoUser, demoPass = demoCredential("UI_USER", "admin"), demoCredential("UI_PASSWORD", "demo")
+		err = store.EnsureAuthConfigured(demoUser, demoPass, true)
 	} else {
-		genUser, genPass, err = store.EnsureAuth()
+		err = store.EnsureAuthConfigured(cfg.UIUser, cfg.UIPassword, false)
 	}
 	if err != nil {
 		logx.Error("webui auth init failed", "err", err)
@@ -108,18 +114,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer ui.Close()
-	logx.Info("webui listening", "addr", ui.Addr().String(), "path", "/"+ui.SecretPath()+"/", "auth", "login required")
-	if !*demo && genPass != "" && cfg.UIPassword == "" {
-		logx.Info("首次运行生成的管理员凭据（可用 UI_USER/UI_PASSWORD 环境变量覆盖后重启）", "username", genUser, "password", genPass)
+	scheme := "http"
+	if cfg.UITLSCert != "" {
+		scheme = "https"
 	}
+	logx.Info("webui listening", "addr", ui.Addr().String(), "scheme", scheme, "path", "/"+ui.SecretPath()+"/", "auth", "login required")
 
 	if *demo {
-		auth, err := store.LoadAuth()
-		if err != nil {
-			logx.Error("demo auth read failed", "err", err)
-			os.Exit(1)
-		}
-		logx.Info("conduitvpn demo starting", "data_dir", cfg.DataDir, "username", auth.Username, "password", auth.Password)
+		logx.Info("conduitvpn demo starting", "data_dir", cfg.DataDir, "username", demoUser, "password", demoPass)
 		<-ctx.Done()
 		logx.Info("conduitvpn demo stopped")
 		return

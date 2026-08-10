@@ -34,33 +34,6 @@
       <p id="login_err" class="login-err" hidden></p>
     </form>
   </div>
-<script>
-(function () {
-  const form = document.getElementById("login_form");
-  const btn = document.getElementById("submit_btn");
-  const err = document.getElementById("login_err");
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    btn.disabled = true;
-    err.hidden = true;
-    try {
-      const res = await fetch("./api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: form.username.value, password: form.password.value }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data.ok) { location.href = "./"; return; }
-      err.textContent = data.error || "登录失败";
-      err.hidden = false;
-    } catch (_) {
-      err.textContent = "网络错误，请重试";
-      err.hidden = false;
-    } finally {
-      btn.disabled = false;
-    }
-  });
-})();
-</script>
+<script src="./login.js?v=__VER__"></script>
 </body>
 </html>

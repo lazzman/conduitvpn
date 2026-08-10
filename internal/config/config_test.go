@@ -2,6 +2,42 @@ package config
 
 import "testing"
 
+func TestValidateSecurityBoundaries(t *testing.T) {
+	base := Config{
+		UIHost:         "127.0.0.1",
+		UIPort:         8787,
+		LocalProxyHost: "127.0.0.1",
+		LocalProxyPort: 7928,
+		ProxyMaxConns:  128,
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("loopback config rejected: %v", err)
+	}
+	remoteUI := base
+	remoteUI.UIHost = "0.0.0.0"
+	if err := remoteUI.Validate(); err == nil {
+		t.Fatal("remote UI without TLS should be rejected")
+	}
+	remoteUI.UITLSCert, remoteUI.UITLSKey = "cert.pem", "key.pem"
+	if err := remoteUI.Validate(); err != nil {
+		t.Fatalf("remote TLS UI rejected: %v", err)
+	}
+	remoteProxy := base
+	remoteProxy.LocalProxyHost = "0.0.0.0"
+	if err := remoteProxy.Validate(); err == nil {
+		t.Fatal("remote unauthenticated proxy should be rejected")
+	}
+	remoteProxy.ProxyUser, remoteProxy.ProxyPass = "proxy", "1234567890123456"
+	if err := remoteProxy.Validate(); err != nil {
+		t.Fatalf("authenticated remote proxy rejected: %v", err)
+	}
+	weakHY2 := base
+	weakHY2.HY2Port, weakHY2.HY2Password = 7929, "short"
+	if err := weakHY2.Validate(); err == nil {
+		t.Fatal("weak hy2 password should be rejected")
+	}
+}
+
 func TestDemoDataDir(t *testing.T) {
 	t.Setenv("CONDUIT_DATA_DIR", "")
 	if got := DemoDataDir(); got != ".conduitvpn-demo" {

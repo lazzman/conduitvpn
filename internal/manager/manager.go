@@ -421,8 +421,15 @@ func (m *Manager) measureLiveLatency(ctx context.Context, n *node.Node) {
 // --- helpers ---
 
 func (m *Manager) prepareFiles(n *node.Node) (string, string, error) {
+	safeConfig, err := vpngate.ValidateOpenVPNProfile(n.ConfigText, n.IP)
+	if err != nil {
+		return "", "", fmt.Errorf("unsafe OpenVPN profile: %w", err)
+	}
 	cfgDir := filepath.Join(m.cfg.DataDir, "configs")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		return "", "", err
+	}
+	if err := os.Chmod(cfgDir, 0o700); err != nil {
 		return "", "", err
 	}
 	name := sanitizeName(n.HostName)
@@ -430,7 +437,7 @@ func (m *Manager) prepareFiles(n *node.Node) (string, string, error) {
 		name = sanitizeName(n.IP)
 	}
 	cfgPath := filepath.Join(cfgDir, name+".ovpn")
-	if err := os.WriteFile(cfgPath, []byte(n.ConfigText), 0o600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(safeConfig), 0o600); err != nil {
 		return "", "", err
 	}
 	authPath := filepath.Join(m.cfg.DataDir, "openvpn.auth")

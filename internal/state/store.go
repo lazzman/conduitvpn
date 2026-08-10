@@ -3,11 +3,16 @@
 package state
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"time"
+	"unicode/utf8"
 
 	"conduitvpn/internal/node"
 )
@@ -17,6 +22,29 @@ type Store struct {
 }
 
 func NewStore(dir string) *Store { return &Store{dir: dir} }
+
+// SecureDir repairs permissions from older releases without following
+// symlinks. State files contain credentials and OpenVPN private material.
+func SecureDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0o700)
+		}
+		if entry.Type().IsRegular() {
+			return os.Chmod(path, 0o600)
+		}
+		return nil
+	})
+}
 
 func (s *Store) NodesPath() string { return filepath.Join(s.dir, "nodes.json") }
 
@@ -71,61 +99,86 @@ func (s *Store) LoadRoute() (Route, error) {
 	return r, nil
 }
 
-// UIAuth holds the web UI credentials and secret path, mirroring the
-// original Python version: random username/password generated on first
-// run and persisted in plaintext so users can edit it directly.
+const passwordIterations = 600000
+
+// UIAuth holds the web UI credentials and secret path. Password is retained
+// only to migrate legacy files and is cleared when the file is next written.
 type UIAuth struct {
-	SecretPath string `json:"secret_path"`
-	Username   string `json:"username"`
-	Password   string `json:"password"`
+	SecretPath         string `json:"secret_path"`
+	Username           string `json:"username"`
+	Password           string `json:"password,omitempty"`
+	PasswordSalt       string `json:"password_salt,omitempty"`
+	PasswordHash       string `json:"password_hash,omitempty"`
+	PasswordIterations int    `json:"password_iterations,omitempty"`
 }
 
 func (s *Store) AuthPath() string { return filepath.Join(s.dir, "ui_auth.json") }
 
-// EnsureAuth loads (or creates on first run) the UI auth config. When
-// freshly created it returns the generated username/password so the
-// startup log can surface them.
+// EnsureAuth remains for demos and tests. Production startup must use
+// EnsureAuthConfigured so credentials are never generated or logged.
 func (s *Store) EnsureAuth() (genUser, genPass string, err error) {
-	return s.ensureAuth("", "")
+	if _, err := s.LoadAuth(); err == nil {
+		return "", "", s.EnsureAuthConfigured("", "", true)
+	} else if !os.IsNotExist(err) {
+		return "", "", err
+	}
+	user, pass := randomCred(12), randomCred(16)
+	if err := s.EnsureAuthConfigured(user, pass, true); err != nil {
+		return "", "", err
+	}
+	return user, pass, nil
 }
 
 // EnsureAuthWithDefaults initializes absent credentials with the supplied
 // defaults. Existing credentials are retained, including a previously
 // generated secret path.
 func (s *Store) EnsureAuthWithDefaults(username, password string) (genUser, genPass string, err error) {
-	return s.ensureAuth(username, password)
-}
-
-func (s *Store) ensureAuth(defaultUser, defaultPass string) (genUser, genPass string, err error) {
-	auth, err := s.LoadAuth()
-	fresh := false
-	if auth.SecretPath == "" {
-		auth.SecretPath = randHex(24)
-		fresh = true
-	}
-	if auth.Username == "" {
-		if defaultUser != "" {
-			auth.Username = defaultUser
-		} else {
-			auth.Username = randomCred(12)
-		}
-		fresh = true
-	}
-	if auth.Password == "" {
-		if defaultPass != "" {
-			auth.Password = defaultPass
-		} else {
-			auth.Password = randomCred(12)
-		}
-		fresh = true
-	}
-	if err := writeJSON(s.AuthPath(), auth); err != nil {
+	if _, err := s.LoadAuth(); err == nil {
+		return "", "", s.EnsureAuthConfigured("", "", true)
+	} else if !os.IsNotExist(err) {
 		return "", "", err
 	}
-	if fresh {
-		return auth.Username, auth.Password, nil
+	if err := s.EnsureAuthConfigured(username, password, true); err != nil {
+		return "", "", err
 	}
-	return "", "", nil
+	return username, password, nil
+}
+
+// EnsureAuthConfigured creates credentials only from explicit configuration.
+// Existing plaintext credentials are transparently migrated to a salted hash.
+func (s *Store) EnsureAuthConfigured(username, password string, demo bool) error {
+	auth, err := s.LoadAuth()
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if (username == "") != (password == "") {
+		return fmt.Errorf("UI_USER and UI_PASSWORD must be configured together")
+	}
+	if username != "" {
+		if utf8.RuneCountInString(password) < 16 && !demo {
+			return fmt.Errorf("UI_PASSWORD must contain at least 16 characters")
+		}
+		auth.Username = username
+		if err := auth.setPassword(password); err != nil {
+			return err
+		}
+	}
+	if auth.SecretPath == "" {
+		secret, err := randHex(24)
+		if err != nil {
+			return err
+		}
+		auth.SecretPath = secret
+	}
+	if auth.Password != "" {
+		if err := auth.setPassword(auth.Password); err != nil {
+			return err
+		}
+	}
+	if auth.Username == "" || auth.PasswordHash == "" || auth.PasswordSalt == "" {
+		return fmt.Errorf("web UI credentials are not initialized; set UI_USER and UI_PASSWORD")
+	}
+	return s.SaveAuth(auth)
 }
 
 func (s *Store) LoadAuth() (UIAuth, error) {
@@ -137,7 +190,33 @@ func (s *Store) LoadAuth() (UIAuth, error) {
 }
 
 func (s *Store) SaveAuth(auth UIAuth) error {
+	auth.Password = ""
 	return writeJSON(s.AuthPath(), auth)
+}
+
+// VerifyPassword verifies a submitted password without retaining plaintext.
+func (a UIAuth) VerifyPassword(password string) bool {
+	if a.PasswordHash == "" || a.PasswordSalt == "" || a.PasswordIterations != passwordIterations {
+		return false
+	}
+	want, err := base64.RawStdEncoding.DecodeString(a.PasswordHash)
+	if err != nil || len(want) != sha256.Size {
+		return false
+	}
+	got := pbkdf2SHA256([]byte(password), []byte(a.PasswordSalt), a.PasswordIterations, len(want))
+	return hmac.Equal(got, want)
+}
+
+func (a *UIAuth) setPassword(password string) error {
+	salt, err := randHex(16)
+	if err != nil {
+		return err
+	}
+	a.PasswordSalt = salt
+	a.PasswordHash = base64.RawStdEncoding.EncodeToString(pbkdf2SHA256([]byte(password), []byte(salt), passwordIterations, sha256.Size))
+	a.PasswordIterations = passwordIterations
+	a.Password = ""
+	return nil
 }
 
 // SecretPath returns the persisted secret path, generating and saving a
@@ -147,24 +226,25 @@ func (s *Store) SecretPath() string {
 	if err := readJSON(s.AuthPath(), &auth); err == nil && auth.SecretPath != "" {
 		return auth.SecretPath
 	}
-	auth.SecretPath = randHex(24)
+	secret, err := randHex(24)
+	if err != nil {
+		return ""
+	}
+	auth.SecretPath = secret
 	_ = writeJSON(s.AuthPath(), auth)
 	return auth.SecretPath
 }
 
-func randHex(n int) string {
+func randHex(n int) (string, error) {
 	const hexChars = "0123456789abcdef"
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
-		// extremely unlikely; fall back to time-based entropy
-		for i := range b {
-			b[i] = byte(time.Now().UnixNano() >> uint(i%8))
-		}
+		return "", err
 	}
 	for i := range b {
 		b[i] = hexChars[b[i]&0x0f]
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // randomCred generates a 12-char credential with lower+upper+digit.
@@ -176,9 +256,7 @@ func randomCred(n int) string {
 	for {
 		b := make([]byte, n)
 		if _, err := rand.Read(b); err != nil {
-			for i := range b {
-				b[i] = byte(time.Now().UnixNano() >> uint((i+7)%32))
-			}
+			panic(fmt.Sprintf("crypto/rand: %v", err))
 		}
 		for i := range b {
 			b[i] = chars[int(b[i])%len(chars)]
@@ -208,11 +286,34 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".conduitvpn-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 func readJSON(path string, v any) error {
@@ -221,4 +322,30 @@ func readJSON(path string, v any) error {
 		return err
 	}
 	return json.Unmarshal(data, v)
+}
+
+// pbkdf2SHA256 is the RFC 8018 PBKDF2 construction using only standard
+// library primitives. Tests verify its output against RFC test vectors.
+func pbkdf2SHA256(password, salt []byte, iterations, length int) []byte {
+	if iterations < 1 || length < 1 {
+		return nil
+	}
+	result := make([]byte, 0, length)
+	for block := uint32(1); len(result) < length; block++ {
+		mac := hmac.New(sha256.New, password)
+		_, _ = mac.Write(salt)
+		_, _ = mac.Write([]byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)})
+		u := mac.Sum(nil)
+		t := append([]byte(nil), u...)
+		for i := 1; i < iterations; i++ {
+			mac = hmac.New(sha256.New, password)
+			_, _ = mac.Write(u)
+			u = mac.Sum(nil)
+			for j := range t {
+				t[j] ^= u[j]
+			}
+		}
+		result = append(result, t...)
+	}
+	return result[:length]
 }

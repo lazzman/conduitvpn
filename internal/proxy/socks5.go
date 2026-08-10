@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"conduitvpn/internal/logx"
 )
@@ -68,6 +69,7 @@ func (s *Server) handleSocks5(client net.Conn, br *bufio.Reader) {
 		return
 	}
 	port := binary.BigEndian.Uint16(portBytes)
+	_ = client.SetReadDeadline(time.Time{})
 
 	upstream, err := s.dial(net.JoinHostPort(host, fmt.Sprint(port)))
 	if err != nil {
