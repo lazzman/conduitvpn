@@ -28,6 +28,7 @@ func main() {
 
 	cfg := config.Load()
 	if *demo {
+		cfg.Demo = true
 		cfg.DataDir = config.DemoDataDir()
 	}
 	logx.Init(cfg.LogLevel)

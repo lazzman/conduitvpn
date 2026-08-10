@@ -150,9 +150,13 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// handleAll routes every request under the secret path (root 404s, like
-// the original — no auto-jump, no secret leak).
+// handleAll routes every request under the secret path. The demo root is an
+// intentional exception so a shared preview URL can be opened directly.
 func (s *Server) handleAll(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Demo && r.URL.Path == "/" {
+		http.Redirect(w, r, "/"+s.secret+"/", http.StatusFound)
+		return
+	}
 	eff := s.validatePath(w, r)
 	if eff == "" {
 		return
@@ -174,7 +178,7 @@ func (s *Server) handleAll(w http.ResponseWriter, r *http.Request) {
 
 	if !s.isAuthorized(r) {
 		if eff == "/" || eff == "/index.html" {
-			serveLogin(w, r)
+			serveLogin(w, r, s.cfg.Demo)
 			return
 		}
 		// static assets (styles.css / app.js) carry no secrets and must
@@ -285,13 +289,18 @@ func randToken() string {
 
 // --- pages ---
 
-func serveLogin(w http.ResponseWriter, r *http.Request) {
+func serveLogin(w http.ResponseWriter, r *http.Request, demo bool) {
 	data, err := staticFS.ReadFile("static/login.html")
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	data = bytes.ReplaceAll(data, []byte("__VER__"), []byte(assetVersion))
+	demoHint := []byte{}
+	if demo {
+		demoHint = []byte(`<p class="login-demo-hint">演示账号：admin <span>密码：demo</span></p>`)
+	}
+	data = bytes.ReplaceAll(data, []byte("__DEMO_HINT__"), demoHint)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(data)

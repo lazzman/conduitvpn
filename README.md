@@ -140,6 +140,8 @@ go run ./cmd/conduitvpn --demo
 
 demo 模式只启动 Web UI，并使用模拟节点、状态、日志和路由操作；不会创建 VPN 隧道，也不提供 HTTP、SOCKS5 或 hysteria2 代理服务。首次运行默认将数据写入 `./.conduitvpn-demo`，后台账号为 `admin`、密码为 `demo`；启动日志会输出随机安全后缀访问地址。可通过 `CONDUIT_DATA_DIR`、`UI_USER`、`UI_PASSWORD` 覆盖这些默认值。
 
+在线 demo：https://conduitvpn.akshop.indevs.in/
+
 ---
 
 ## 🖥️ 使用指南

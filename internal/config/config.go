@@ -13,6 +13,8 @@ import (
 )
 
 type Config struct {
+	// Demo enables the isolated UI preview behavior selected by --demo.
+	Demo             bool
 	DataDir          string
 	APIURL           string
 	FetchTimeout     time.Duration
