@@ -60,8 +60,10 @@ type Config struct {
 	DNSServer      string
 
 	// Web UI (M4)
-	UIHost string
-	UIPort int
+	UIHost     string
+	UIPort     int
+	UIUser     string
+	UIPassword string
 
 	// Route mode (M6)
 	RouteMode    string
@@ -132,6 +134,9 @@ func Load() Config {
 
 		UIHost: envStr("UI_HOST", "0.0.0.0"),
 		UIPort: envInt("UI_PORT", 8787),
+		UIUser: envStr("UI_USER", "admin"),
+		// 空则首次启动自动生成随机密码并持久化(启动日志可见)
+		UIPassword: envStr("UI_PASSWORD", ""),
 
 		RouteMode:    envStr("ROUTE_MODE", "auto"),
 		RouteCountry: envStr("ROUTE_COUNTRY", ""),

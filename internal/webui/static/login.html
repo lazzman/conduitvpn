@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>ConduitVPN · 登录</title>
+<script>
+  document.documentElement.dataset.theme =
+    window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+</script>
+<link rel="stylesheet" href="./styles.css?v=__VER__">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="brand login-brand">
+      <div class="brand-mark" aria-hidden="true"><span>▲</span></div>
+      <div class="brand-text">
+        <span class="brand-name">CONDUITVPN</span>
+        <span class="brand-sub">VPN GATEWAY</span>
+      </div>
+    </div>
+    <h1 class="login-title">管理后台</h1>
+    <p class="login-sub">请输入您的管理账号和安全密码以继续</p>
+    <form id="login_form" class="login-form">
+      <label>用户名
+        <input class="input input-block" name="username" required autocomplete="username" autofocus>
+      </label>
+      <label>密码
+        <input class="input input-block" type="password" name="password" required autocomplete="current-password">
+      </label>
+      <button type="submit" class="btn btn-block" id="submit_btn">登 录</button>
+      <p id="login_err" class="login-err" hidden></p>
+    </form>
+  </div>
+<script>
+(function () {
+  const form = document.getElementById("login_form");
+  const btn = document.getElementById("submit_btn");
+  const err = document.getElementById("login_err");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    btn.disabled = true;
+    err.hidden = true;
+    try {
+      const res = await fetch("./api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: form.username.value, password: form.password.value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) { location.href = "./"; return; }
+      err.textContent = data.error || "登录失败";
+      err.hidden = false;
+    } catch (_) {
+      err.textContent = "网络错误，请重试";
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>

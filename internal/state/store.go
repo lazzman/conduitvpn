@@ -71,13 +71,55 @@ func (s *Store) LoadRoute() (Route, error) {
 	return r, nil
 }
 
-// UIAuth holds the web UI secret path. It is persisted so the URL stays
-// stable across restarts.
+// UIAuth holds the web UI credentials and secret path, mirroring the
+// original Python version: random username/password generated on first
+// run and persisted in plaintext so users can edit it directly.
 type UIAuth struct {
 	SecretPath string `json:"secret_path"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
 }
 
 func (s *Store) AuthPath() string { return filepath.Join(s.dir, "ui_auth.json") }
+
+// EnsureAuth loads (or creates on first run) the UI auth config. When
+// freshly created it returns the generated username/password so the
+// startup log can surface them.
+func (s *Store) EnsureAuth() (genUser, genPass string, err error) {
+	auth, err := s.LoadAuth()
+	fresh := false
+	if auth.SecretPath == "" {
+		auth.SecretPath = randHex(24)
+		fresh = true
+	}
+	if auth.Username == "" {
+		auth.Username = randomCred(12)
+		fresh = true
+	}
+	if auth.Password == "" {
+		auth.Password = randomCred(12)
+		fresh = true
+	}
+	if err := writeJSON(s.AuthPath(), auth); err != nil {
+		return "", "", err
+	}
+	if fresh {
+		return auth.Username, auth.Password, nil
+	}
+	return "", "", nil
+}
+
+func (s *Store) LoadAuth() (UIAuth, error) {
+	var auth UIAuth
+	if err := readJSON(s.AuthPath(), &auth); err != nil {
+		return auth, err
+	}
+	return auth, nil
+}
+
+func (s *Store) SaveAuth(auth UIAuth) error {
+	return writeJSON(s.AuthPath(), auth)
+}
 
 // SecretPath returns the persisted secret path, generating and saving a
 // fresh one on first run.
@@ -104,6 +146,42 @@ func randHex(n int) string {
 		b[i] = hexChars[b[i]&0x0f]
 	}
 	return string(b)
+}
+
+// randomCred generates a 12-char credential with lower+upper+digit.
+func randomCred(n int) string {
+	const lower = "abcdefghijklmnopqrstuvwxyz"
+	const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	const digits = "0123456789"
+	chars := []byte(lower + upper + digits)
+	for {
+		b := make([]byte, n)
+		if _, err := rand.Read(b); err != nil {
+			for i := range b {
+				b[i] = byte(time.Now().UnixNano() >> uint((i+7)%32))
+			}
+		}
+		for i := range b {
+			b[i] = chars[int(b[i])%len(chars)]
+		}
+		if b[0] >= '0' && b[0] <= '9' {
+			b[0] = lower[int(b[0])%26]
+		}
+		hasLower, hasUpper, hasDigit := false, false, false
+		for _, c := range b {
+			switch {
+			case c >= 'a' && c <= 'z':
+				hasLower = true
+			case c >= 'A' && c <= 'Z':
+				hasUpper = true
+			case c >= '0' && c <= '9':
+				hasDigit = true
+			}
+		}
+		if hasLower && hasUpper && hasDigit {
+			return string(b)
+		}
+	}
 }
 
 func writeJSON(path string, v any) error {

@@ -10,9 +10,9 @@
 
 ## 📸 界面预览
 
-| 深色主题 | 浅色主题 |
-| --- | --- |
-| ![dark](docs/screenshots/dark.png) | ![light](docs/screenshots/light.png) |
+| 登录页 | 深色主题 | 浅色主题 |
+| --- | --- | --- |
+| ![login](docs/screenshots/login.png) | ![dark](docs/screenshots/dark.png) | ![light](docs/screenshots/light.png) |
 
 - 顶部状态卡片：当前节点 / 隧道出口 / 代理端口 / 运行时长
 - 路由模式：智能自动 / 固定国家（多选）/ 固定 IP（一键锁定）
@@ -136,7 +136,12 @@ docker run -d --name conduitvpn \
 
 ### Web 管理后台
 
-打开 `http://<你的IP>:8787/`（自动跳转到带安全后缀的地址）。后缀为随机 24 位十六进制，持久化在 `ui_auth.json`，重启不变。
+访问 `http://<你的IP>:8787/<安全后缀>/` 进行登录。鉴权与 Python 原版一致：
+
+- **随机账号密码**：首次启动生成并保存在 `ui_auth.json`（启动日志会打印一次），也可用 `UI_USER` / `UI_PASSWORD` 环境变量覆盖后重启
+- **安全后缀**：访问路径为随机 24 位十六进制，root 返回 404，不泄露入口
+- **会话**：登录后下发 HttpOnly 会话 Cookie（30 天），服务端内存会话
+- **退出**：面板内有登出入口（`POST /api/logout`）
 
 ### 本地代理
 
@@ -215,6 +220,7 @@ curl -X PUT -d '{"mode":"auto"}' http://127.0.0.1:8787/<secret>/api/route
 | `UPSTREAM_SINGBOX_INDEX` / `_PORT` | `0` / `10800` | 订阅节点序号 / 本地监听端口 |
 | **Web UI** | | |
 | `UI_HOST` / `UI_PORT` | `0.0.0.0:8787` | 管理后台 |
+| `UI_USER` / `UI_PASSWORD` | 空（自动生成） | 后台登录凭据，显式设置后覆盖自动生成的 |
 
 ---
 

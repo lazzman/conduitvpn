@@ -5,19 +5,10 @@ const $ = (id) => document.getElementById(id);
 
 /* ---- theme ---- */
 // Three-way theme: system (follow OS) / dark / light, persisted.
-const themeBtn = $("btn-theme");
+const themeSel = $("btn-theme");
 const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-const THEME_ORDER = ["system", "dark", "light"];
-const THEME_LABEL = { system: "跟随系统", dark: "深色", light: "浅色" };
-
-const THEME_ICONS = {
-  system: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
-  dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
-  light: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
-};
-
 let theme = localStorage.getItem("conduit-theme") || "system";
-if (!THEME_ICONS[theme]) theme = "system";
+if (!["system", "dark", "light"].includes(theme)) theme = "system";
 
 function effectiveTheme() {
   return theme === "system" ? (darkQuery.matches ? "dark" : "light") : theme;
@@ -28,11 +19,10 @@ function applyTheme() {
   document.documentElement.dataset.theme = eff;
   document.querySelector('meta[name="color-scheme"]').setAttribute(
     "content", theme === "system" ? "dark light" : eff);
-  themeBtn.innerHTML = THEME_ICONS[theme];
-  themeBtn.title = "主题：" + THEME_LABEL[theme] + "（点击切换）";
+  themeSel.value = theme;
 }
-themeBtn.addEventListener("click", () => {
-  theme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
+themeSel.addEventListener("change", () => {
+  theme = themeSel.value;
   localStorage.setItem("conduit-theme", theme);
   applyTheme();
   drawChart();
@@ -42,6 +32,7 @@ darkQuery.addEventListener("change", () => {
 });
 applyTheme();
 
+/* ---- state pill ---- */
 /* ---- state pill ---- */
 const STATE_LABEL = {
   idle: "IDLE",

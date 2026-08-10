@@ -67,6 +67,13 @@ func main() {
 	}
 
 	store := state.NewStore(cfg.DataDir)
+
+	// Web UI 凭据：首次运行生成随机账号/密码并持久化到 ui_auth.json。
+	genUser, genPass, err := store.EnsureAuth()
+	if err != nil {
+		logx.Error("webui auth init failed", "err", err)
+		os.Exit(1)
+	}
 	m := manager.New(cfg)
 
 	proxySrv := proxy.New(cfg.LocalProxyHost, cfg.LocalProxyPort, cfg.ProxyUser, cfg.ProxyPass, cfg.DNSServer, cfg.ProxyMaxConns)
@@ -83,7 +90,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer ui.Close()
-	logx.Info("webui listening", "addr", ui.Addr().String(), "path", "/"+ui.SecretPath())
+	logx.Info("webui listening", "addr", ui.Addr().String(), "path", "/"+ui.SecretPath()+"/", "auth", "login required")
+	if genPass != "" && cfg.UIPassword == "" {
+		logx.Info("首次运行生成的管理员凭据（可用 UI_USER/UI_PASSWORD 环境变量覆盖后重启）", "username", genUser, "password", genPass)
+	}
 
 	logx.Info("conduitvpn starting", "data_dir", cfg.DataDir)
 	if err := m.Run(ctx); err != nil && ctx.Err() == nil {

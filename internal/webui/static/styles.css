@@ -140,6 +140,50 @@ body {
   height: 15px;
 }
 
+.theme-select {
+  width: auto;
+  padding: 6px 10px;
+}
+
+/* ---- login page ---- */
+.login-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 20px;
+}
+.login-card {
+  width: 340px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.login-brand { margin-bottom: 12px; }
+.login-title { font-size: 17px; font-weight: 700; letter-spacing: 0.02em; }
+.login-sub { font-size: 12px; color: var(--text-3); }
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.login-form .input { background: var(--surface-2); }
+.login-form label {
+  font-size: 12px;
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.input.input-block { width: 100%; }
+.btn-block { width: 100%; padding: 9px 0; }
+.login-err { font-size: 12px; color: var(--error); margin: 0; }
+
 .input {
   font-family: var(--sans);
   font-size: 12.5px;
