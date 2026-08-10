@@ -129,6 +129,17 @@ body {
 .btn-ghost:hover { color: var(--text); background: var(--surface-2); }
 .btn-ghost.active { color: var(--accent); border-color: rgba(52, 211, 153, 0.4); }
 
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 9px;
+}
+.btn-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
 .input {
   font-family: var(--sans);
   font-size: 12.5px;
