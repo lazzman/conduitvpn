@@ -1,3 +1,4 @@
 /conduitvpn
 *.tmp
 .DS_Store
+.env

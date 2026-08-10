@@ -2,7 +2,8 @@
 # ConduitVPN 一键部署（Docker 版，~50 行，对比 Python 原版 1184 行）
 set -euo pipefail
 
-IMAGE="conduitvpn:latest"
+IMAGE="ghcr.io/sarices/conduitvpn:latest"  # CI 推送即构建
+BUILD_LOCAL="${BUILD_LOCAL:-0}"            # 1=本地 docker build（不拉 GHCR）
 NAME="conduitvpn"
 UI_PORT="${UI_PORT:-8787}"
 PROXY_PORT="${PROXY_PORT:-7928}"
@@ -21,8 +22,14 @@ if [ "$HY2_PORT" != "0" ] && [ -z "$HY2_PASSWORD" ]; then
     exit 1
 fi
 
-echo "→ 构建镜像 $IMAGE ..."
-docker build -t "$IMAGE" .
+if [ "$BUILD_LOCAL" = "1" ]; then
+    echo "→ 本地构建镜像 $IMAGE ..."
+    docker build -t conduitvpn:local .
+    IMAGE="conduitvpn:local"
+else
+    echo "→ 拉取镜像 $IMAGE ..."
+    docker pull "$IMAGE"
+fi
 
 echo "→ 创建数据目录 $DATA_DIR ..."
 mkdir -p "$DATA_DIR"
@@ -49,7 +56,7 @@ docker run -d \
 
 echo
 echo "✅ 部署完成！"
-echo "   后台地址: http://<你的IP>:$UI_PORT/  (将自动跳转到带安全后缀的 URL)"
+echo "   后台地址: http://<你的IP>:$UI_PORT/  (需登录，首次凭据见容器日志)"
 echo "   代理端口: $PROXY_HOST:$PROXY_PORT (HTTP + SOCKS5 双协议)"
 if [ "$HY2_PORT" != "0" ]; then
     echo "   hy2 入站: 0.0.0.0:$HY2_PORT/udp (hysteria2, 需 HY2_PASSWORD)"

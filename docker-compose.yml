@@ -1,0 +1,20 @@
+# ConduitVPN 生产部署（Docker Compose）
+# 用法: cp .env.example .env && 修改密码后 `docker compose up -d`
+# 依赖: docker compose v2 + 宿主机 /dev/net/tun 已启用
+services:
+  conduitvpn:
+    image: ghcr.io/sarices/conduitvpn:latest
+    container_name: conduitvpn
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./data:/data/conduitvpn
+    env_file:
+      - .env
+    ports:
+      - "0.0.0.0:8787:8787/tcp"      # Web 管理后台（需登录）
+      - "127.0.0.1:7928:7928/tcp"    # HTTP/SOCKS5 代理（仅本机回环）
+      - "0.0.0.0:7929:7929/udp"      # hysteria2 入站（可注释关闭）
