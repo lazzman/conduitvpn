@@ -5,10 +5,14 @@ const $ = (id) => document.getElementById(id);
 
 /* ---- theme ---- */
 // Three-way theme: system (follow OS) / dark / light, persisted.
-const themeSel = $("btn-theme");
+// Icon button cycles system -> dark -> light -> system.
+const themeBtn = $("btn-theme");
 const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 let theme = localStorage.getItem("conduit-theme") || "system";
 if (!["system", "dark", "light"].includes(theme)) theme = "system";
+
+const THEME_NEXT = { system: "dark", dark: "light", light: "system" };
+const THEME_TITLE = { system: "主题：跟随系统", dark: "主题：深色", light: "主题：浅色" };
 
 function effectiveTheme() {
   return theme === "system" ? (darkQuery.matches ? "dark" : "light") : theme;
@@ -19,10 +23,13 @@ function applyTheme() {
   document.documentElement.dataset.theme = eff;
   document.querySelector('meta[name="color-scheme"]').setAttribute(
     "content", theme === "system" ? "dark light" : eff);
-  themeSel.value = theme;
+  $("icon-theme-sun").hidden = theme !== "light";
+  $("icon-theme-moon").hidden = theme !== "dark";
+  $("icon-theme-monitor").hidden = theme !== "system";
+  themeBtn.title = THEME_TITLE[theme];
 }
-themeSel.addEventListener("change", () => {
-  theme = themeSel.value;
+themeBtn.addEventListener("click", () => {
+  theme = THEME_NEXT[theme];
   localStorage.setItem("conduit-theme", theme);
   applyTheme();
   drawChart();

@@ -139,11 +139,7 @@ body {
   width: 15px;
   height: 15px;
 }
-
-.theme-select {
-  width: auto;
-  padding: 6px 10px;
-}
+.btn-icon svg[hidden] { display: none; }
 
 /* ---- login page ---- */
 .login-body {
