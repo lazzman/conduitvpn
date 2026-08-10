@@ -10,9 +10,7 @@
 
 ## 📸 界面预览
 
-| 登录页 | 深色主题 | 浅色主题 |
-| --- | --- | --- |
-| ![login](docs/screenshots/login.png) | ![dark](docs/screenshots/dark.png) | ![light](docs/screenshots/light.png) |
+![ConduitVPN 浅色主题管理后台](docs/screenshots/light.png)
 
 - 顶部状态卡片：当前节点 / 隧道出口 / 代理端口 / 运行时长
 - 路由模式：智能自动 / 固定国家地区（多选）/ 固定 IP（一键锁定）
