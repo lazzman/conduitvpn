@@ -1,8 +1,8 @@
-/* AimiliVPN Gateway — confident dark tech.
-   One accent (signal green), zinc neutrals, mono for data.
-   No glassmorphism, no AI purple, no pure black. */
+/* Conduit VPN Gateway — confident dark tech, with a light counterpart.
+   One accent (signal green), neutral grays, mono for data. */
 
 :root {
+  color-scheme: dark;
   --bg: #09090b;
   --surface: #101013;
   --surface-2: #141418;
@@ -15,13 +15,41 @@
 
   --accent: #34d399;
   --accent-dim: rgba(52, 211, 153, 0.12);
+  --accent-border: rgba(52, 211, 153, 0.28);
+  --on-accent: #052e22;
   --warn: #fbbf24;
   --error: #f87171;
+
+  --topbar-bg: rgba(9, 9, 11, 0.9);
+  --bg-glow: radial-gradient(1100px 420px at 85% -10%, rgba(52, 211, 153, 0.05), transparent 60%);
 
   --radius: 10px;
   --radius-sm: 6px;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f6f8;
+  --surface: #ffffff;
+  --surface-2: #f1f1f4;
+  --border: #e5e5ea;
+  --border-strong: #d4d4db;
+
+  --text: #18181b;
+  --text-2: #52525b;
+  --text-3: #86868f;
+
+  --accent: #059669;
+  --accent-dim: rgba(5, 150, 105, 0.1);
+  --accent-border: rgba(5, 150, 105, 0.32);
+  --on-accent: #ffffff;
+  --warn: #b45309;
+  --error: #dc2626;
+
+  --topbar-bg: rgba(246, 246, 248, 0.92);
+  --bg-glow: radial-gradient(1100px 420px at 85% -10%, rgba(5, 150, 105, 0.06), transparent 60%);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -33,9 +61,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: var(--text);
-  background:
-    radial-gradient(1100px 420px at 85% -10%, rgba(52, 211, 153, 0.05), transparent 60%),
-    var(--bg);
+  background: var(--bg-glow), var(--bg);
   min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
 }
@@ -52,7 +78,7 @@ body {
   justify-content: space-between;
   height: 58px;
   padding: 0 22px;
-  background: rgba(9, 9, 11, 0.9);
+  background: var(--topbar-bg);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
@@ -83,7 +109,7 @@ body {
   font-family: var(--sans);
   font-size: 12.5px;
   font-weight: 600;
-  color: #052e22;
+  color: var(--on-accent);
   background: var(--accent);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -132,7 +158,6 @@ body {
   background: var(--surface);
   color: var(--text-2);
 }
-
 .pill .dot {
   width: 7px;
   height: 7px;
@@ -286,7 +311,7 @@ tbody td.num { text-align: right; font-family: var(--mono); color: var(--text-2)
   font-size: 10.5px;
   letter-spacing: 0.08em;
   color: var(--accent);
-  border: 1px solid rgba(52, 211, 153, 0.25);
+  border: 1px solid var(--accent-border);
   background: var(--accent-dim);
   border-radius: 4px;
   padding: 1px 5px;

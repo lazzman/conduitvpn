@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +12,7 @@ import (
 	"aimilivpn/internal/config"
 	"aimilivpn/internal/logx"
 	"aimilivpn/internal/manager"
+	"aimilivpn/internal/netfix"
 	"aimilivpn/internal/proxy"
 	"aimilivpn/internal/state"
 	"aimilivpn/internal/tunnel"
@@ -34,6 +36,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// 方案 B 回包路由修复：入站 UI/代理连接的响应走 docker 网关，
+	// 出站代理流量仍走 VPN。失败不影响主流程（仅入站回包降级）。
+	if err := netfix.Apply([]string{fmt.Sprint(cfg.UIPort), fmt.Sprint(cfg.LocalProxyPort)}); err != nil {
+		logx.Warn("netfix skipped", "err", err)
+	} else {
+		logx.Info("netfix applied", "ports", fmt.Sprint(cfg.UIPort)+","+fmt.Sprint(cfg.LocalProxyPort))
+	}
 
 	store := state.NewStore(cfg.DataDir)
 	m := manager.New(cfg)

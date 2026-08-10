@@ -1,7 +1,24 @@
-/* AimiliVPN Gateway frontend — vanilla, no framework, one accent. */
+/* Conduit VPN Gateway frontend — vanilla, no framework, one accent. */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+
+/* ---- theme ---- */
+const themeBtn = $("btn-theme");
+const systemDark = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+let theme = localStorage.getItem("conduit-theme") || systemDark;
+
+function applyTheme(t) {
+  theme = t;
+  document.documentElement.dataset.theme = t;
+  document.querySelector('meta[name="color-scheme"]').setAttribute("content", t);
+  themeBtn.textContent = t === "dark" ? "LIGHT" : "DARK";
+}
+themeBtn.addEventListener("click", () => {
+  applyTheme(theme === "dark" ? "light" : "dark");
+  localStorage.setItem("conduit-theme", theme);
+});
+applyTheme(theme);
 
 /* ---- state pill ---- */
 const STATE_LABEL = {

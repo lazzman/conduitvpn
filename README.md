@@ -1,6 +1,6 @@
-# aimilivpn
+# conduit
 
-AimiliVPN — VPNGate 代理网关管理器（Go 重写版）。
+Conduit — VPNGate 代理网关管理器（Go 重写版，原品牌 AimiliVPN）。
 
 架构决策（grilling session 锁定）：
 
