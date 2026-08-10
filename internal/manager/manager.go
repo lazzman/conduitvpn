@@ -8,8 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -60,9 +60,11 @@ type Manager struct {
 	fetchUpstream *config.UpstreamProxy
 	upstreamRT    *upstream.Runtime
 
-	startedAt  time.Time
-	refreshCh  chan struct{}
-	refreshReq atomic.Bool
+	startedAt   time.Time
+	refreshCh   chan struct{}
+	refreshReq  atomic.Bool
+	demo        bool
+	demoRefresh uint32
 }
 
 // errModeChanged aborts the current connect/monitor cycle so the loop
@@ -104,6 +106,16 @@ func New(cfg config.Config) *Manager {
 	return m
 }
 
+// NewDemo returns a manager backed by deterministic sample data. It never
+// starts an upstream, tunnel, benchmark, or health probe.
+func NewDemo(cfg config.Config) *Manager {
+	m := New(cfg)
+	m.demo = true
+	m.refreshDemoNodes()
+	logx.Info("demo manager ready", "nodes", len(demoNodes(0)))
+	return m
+}
+
 // Snapshot returns the current supervisor view.
 func (m *Manager) Snapshot() Snapshot {
 	m.mu.Lock()
@@ -122,11 +134,50 @@ func (m *Manager) Snapshot() Snapshot {
 
 // TriggerFetch asks the supervisor to refresh the node pool now.
 func (m *Manager) TriggerFetch() {
+	if m.demo {
+		m.refreshDemoNodes()
+		return
+	}
 	if !m.refreshReq.Swap(true) {
 		select {
 		case m.refreshCh <- struct{}{}:
 		default:
 		}
+	}
+}
+
+func (m *Manager) refreshDemoNodes() {
+	refresh := atomic.AddUint32(&m.demoRefresh, 1)
+	nodes := demoNodes(refresh)
+	if err := m.store.SaveNodes(nodes); err != nil {
+		logx.Warn("save demo nodes failed", "err", err)
+	}
+	m.updateDemoCurrent(nodes)
+	logx.Info("demo nodes refreshed", "count", len(nodes))
+}
+
+func (m *Manager) updateDemoCurrent(nodes []*node.Node) {
+	candidates := m.selectCandidates(nodes)
+	if len(candidates) == 0 {
+		m.setState(StateDrifting, "demo route has no matching node")
+		return
+	}
+	m.mu.Lock()
+	m.current = candidates[0]
+	m.state = StateConnected
+	m.stateDetail = candidates[0].HostName
+	m.mu.Unlock()
+	logx.Info("state", "state", string(StateConnected), "detail", candidates[0].HostName)
+}
+
+func demoNodes(refresh uint32) []*node.Node {
+	latencyOffset := int(refresh%3) * 7
+	return []*node.Node{
+		{HostName: "demo-tokyo-01", IP: "203.0.113.10", Score: 9821, Ping: 18, Speed: 180000000, CountryLong: "Japan", CountryShort: "JP", Sessions: 42, Uptime: 864000, Operator: "Demo Tokyo", RemoteHost: "203.0.113.10", RemotePort: 1194, RemoteProto: "udp", Tested: true, LatencyMS: 48 + latencyOffset},
+		{HostName: "demo-seoul-01", IP: "203.0.113.20", Score: 9140, Ping: 25, Speed: 150000000, CountryLong: "South Korea", CountryShort: "KR", Sessions: 31, Uptime: 640000, Operator: "Demo Seoul", RemoteHost: "203.0.113.20", RemotePort: 1194, RemoteProto: "udp", Tested: true, LatencyMS: 72 + latencyOffset},
+		{HostName: "demo-singapore-01", IP: "203.0.113.30", Score: 8860, Ping: 39, Speed: 120000000, CountryLong: "Singapore", CountryShort: "SG", Sessions: 24, Uptime: 432000, Operator: "Demo Singapore", RemoteHost: "203.0.113.30", RemotePort: 443, RemoteProto: "tcp", Tested: true, LatencyMS: 96 + latencyOffset},
+		{HostName: "demo-frankfurt-01", IP: "203.0.113.40", Score: 8010, Ping: 53, Speed: 95000000, CountryLong: "Germany", CountryShort: "DE", Sessions: 18, Uptime: 259200, Operator: "Demo Frankfurt", RemoteHost: "203.0.113.40", RemotePort: 1194, RemoteProto: "udp", Tested: true, LatencyMS: 164 + latencyOffset},
+		{HostName: "demo-newyork-01", IP: "203.0.113.50", Score: 7450, Ping: 78, Speed: 76000000, CountryLong: "United States", CountryShort: "US", Sessions: 11, Uptime: 172800, Operator: "Demo New York", RemoteHost: "203.0.113.50", RemotePort: 443, RemoteProto: "tcp", Tested: true, LatencyMS: 218 + latencyOffset},
 	}
 }
 
@@ -500,6 +551,14 @@ func (m *Manager) SetRouteConfig(mode, country, node string) error {
 
 	if err := m.store.SaveRoute(state.Route{Mode: mode, Country: country, Node: node}); err != nil {
 		logx.Warn("save route config failed", "err", err)
+	}
+	if m.demo {
+		nodes, err := m.store.LoadNodes()
+		if err != nil {
+			logx.Warn("load demo nodes failed", "err", err)
+		} else {
+			m.updateDemoCurrent(nodes)
+		}
 	}
 	logx.Info("route mode set", "mode", mode, "country", country, "node", node)
 

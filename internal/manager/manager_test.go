@@ -16,6 +16,31 @@ func testManager(t *testing.T, mode, country, node string) *Manager {
 	return m
 }
 
+func TestNewDemoSeedsInteractiveNodes(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), RouteMode: "auto"}
+	m := NewDemo(cfg)
+	snap := m.Snapshot()
+	if snap.State != string(StateConnected) || snap.CurrentNode == nil {
+		t.Fatalf("demo snapshot = %+v", snap)
+	}
+	nodes, err := m.store.LoadNodes()
+	if err != nil || len(nodes) < 4 {
+		t.Fatalf("demo nodes = %d, err = %v", len(nodes), err)
+	}
+	before := nodes[0].LatencyMS
+	m.TriggerFetch()
+	nodes, err = m.store.LoadNodes()
+	if err != nil || nodes[0].LatencyMS == before {
+		t.Fatalf("demo refresh did not update nodes: before=%d after=%d err=%v", before, nodes[0].LatencyMS, err)
+	}
+	if err := m.SetRouteConfig("fixed", "", "demo-newyork-01"); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Snapshot().CurrentNode; got == nil || got.HostName != "demo-newyork-01" {
+		t.Fatalf("fixed demo node = %+v", got)
+	}
+}
+
 func fakeNodes() []*node.Node {
 	mk := func(host, ip, cc string) *node.Node {
 		return &node.Node{HostName: host, IP: ip, CountryShort: cc, Tested: true, LatencyMS: 50}

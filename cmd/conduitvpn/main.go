@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -22,67 +23,83 @@ import (
 )
 
 func main() {
+	demo := flag.Bool("demo", false, "start the interactive Web UI demo without VPN or proxy services")
+	flag.Parse()
+
 	cfg := config.Load()
+	if *demo {
+		cfg.DataDir = config.DemoDataDir()
+	}
 	logx.Init(cfg.LogLevel)
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		logx.Error("cannot create data dir", "dir", cfg.DataDir, "err", err)
 		os.Exit(1)
 	}
-	if v, err := tunnel.Version(); err != nil {
-		logx.Error("openvpn unavailable", "err", err)
-		os.Exit(1)
-	} else {
-		logx.Info("openvpn found", "version", v)
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	// 方案 B 回包路由修复：入站 UI/代理连接的响应走 docker 网关，
-	// 出站代理流量仍走 VPN。失败不影响主流程（仅入站回包降级）。
-	udpPorts := []string{}
-	if cfg.HY2Port > 0 {
-		udpPorts = append(udpPorts, fmt.Sprint(cfg.HY2Port))
-	}
-	if err := netfix.Apply([]string{fmt.Sprint(cfg.UIPort), fmt.Sprint(cfg.LocalProxyPort)}, udpPorts); err != nil {
-		logx.Warn("netfix skipped", "err", err)
-	} else {
-		logx.Info("netfix applied", "tcp", fmt.Sprint(cfg.UIPort)+","+fmt.Sprint(cfg.LocalProxyPort), "udp", strings.Join(udpPorts, ","))
-	}
-
-	// hy2 inbound gateway (hysteria2 clients → 方案 B tunnel)
-	if cfg.HY2Port > 0 {
-		hy2Runner, err := hy2.Start(ctx, cfg.DataDir, hy2.Config{
-			Port:     cfg.HY2Port,
-			Bind:     cfg.HY2Bind,
-			Password: cfg.HY2Password,
-			ObfsPass: cfg.HY2ObfsPassword,
-		})
-		if err != nil {
-			logx.Error("hy2 start failed", "err", err)
-			os.Exit(1)
-		}
-		defer hy2Runner.Stop()
-	}
 
 	store := state.NewStore(cfg.DataDir)
 
 	// Web UI 凭据：首次运行生成随机账号/密码并持久化到 ui_auth.json。
-	genUser, genPass, err := store.EnsureAuth()
+	var genUser, genPass string
+	var err error
+	if *demo {
+		genUser, genPass, err = store.EnsureAuthWithDefaults(demoCredential("UI_USER", "admin"), demoCredential("UI_PASSWORD", "demo"))
+	} else {
+		genUser, genPass, err = store.EnsureAuth()
+	}
 	if err != nil {
 		logx.Error("webui auth init failed", "err", err)
 		os.Exit(1)
 	}
-	m := manager.New(cfg)
+	var m *manager.Manager
+	if *demo {
+		m = manager.NewDemo(cfg)
+	} else {
+		if v, err := tunnel.Version(); err != nil {
+			logx.Error("openvpn unavailable", "err", err)
+			os.Exit(1)
+		} else {
+			logx.Info("openvpn found", "version", v)
+		}
 
-	proxySrv := proxy.New(cfg.LocalProxyHost, cfg.LocalProxyPort, cfg.ProxyUser, cfg.ProxyPass, cfg.DNSServer, cfg.ProxyMaxConns)
-	if err := proxySrv.Start(); err != nil {
-		logx.Error("proxy start failed", "err", err)
-		os.Exit(1)
+		// 方案 B 回包路由修复：入站 UI/代理连接的响应走 docker 网关，
+		// 出站代理流量仍走 VPN。失败不影响主流程（仅入站回包降级）。
+		udpPorts := []string{}
+		if cfg.HY2Port > 0 {
+			udpPorts = append(udpPorts, fmt.Sprint(cfg.HY2Port))
+		}
+		if err := netfix.Apply([]string{fmt.Sprint(cfg.UIPort), fmt.Sprint(cfg.LocalProxyPort)}, udpPorts); err != nil {
+			logx.Warn("netfix skipped", "err", err)
+		} else {
+			logx.Info("netfix applied", "tcp", fmt.Sprint(cfg.UIPort)+","+fmt.Sprint(cfg.LocalProxyPort), "udp", strings.Join(udpPorts, ","))
+		}
+
+		// hy2 inbound gateway (hysteria2 clients → 方案 B tunnel)
+		if cfg.HY2Port > 0 {
+			hy2Runner, err := hy2.Start(ctx, cfg.DataDir, hy2.Config{
+				Port:     cfg.HY2Port,
+				Bind:     cfg.HY2Bind,
+				Password: cfg.HY2Password,
+				ObfsPass: cfg.HY2ObfsPassword,
+			})
+			if err != nil {
+				logx.Error("hy2 start failed", "err", err)
+				os.Exit(1)
+			}
+			defer hy2Runner.Stop()
+		}
+
+		proxySrv := proxy.New(cfg.LocalProxyHost, cfg.LocalProxyPort, cfg.ProxyUser, cfg.ProxyPass, cfg.DNSServer, cfg.ProxyMaxConns)
+		if err := proxySrv.Start(); err != nil {
+			logx.Error("proxy start failed", "err", err)
+			os.Exit(1)
+		}
+		defer proxySrv.Close()
+		logx.Info("proxy listening", "addr", proxySrv.Addr().String(), "dual", "http+socks5")
+		m = manager.New(cfg)
 	}
-	defer proxySrv.Close()
-	logx.Info("proxy listening", "addr", proxySrv.Addr().String(), "dual", "http+socks5")
 
 	ui := webui.New(cfg, store, m)
 	if err := ui.Start(); err != nil {
@@ -91,8 +108,20 @@ func main() {
 	}
 	defer ui.Close()
 	logx.Info("webui listening", "addr", ui.Addr().String(), "path", "/"+ui.SecretPath()+"/", "auth", "login required")
-	if genPass != "" && cfg.UIPassword == "" {
+	if !*demo && genPass != "" && cfg.UIPassword == "" {
 		logx.Info("首次运行生成的管理员凭据（可用 UI_USER/UI_PASSWORD 环境变量覆盖后重启）", "username", genUser, "password", genPass)
+	}
+
+	if *demo {
+		auth, err := store.LoadAuth()
+		if err != nil {
+			logx.Error("demo auth read failed", "err", err)
+			os.Exit(1)
+		}
+		logx.Info("conduitvpn demo starting", "data_dir", cfg.DataDir, "username", auth.Username, "password", auth.Password)
+		<-ctx.Done()
+		logx.Info("conduitvpn demo stopped")
+		return
 	}
 
 	logx.Info("conduitvpn starting", "data_dir", cfg.DataDir)
@@ -101,4 +130,11 @@ func main() {
 		os.Exit(1)
 	}
 	logx.Info("conduitvpn stopped")
+}
+
+func demoCredential(env, fallback string) string {
+	if value := os.Getenv(env); value != "" {
+		return value
+	}
+	return fallback
 }

@@ -2,6 +2,17 @@ package config
 
 import "testing"
 
+func TestDemoDataDir(t *testing.T) {
+	t.Setenv("CONDUIT_DATA_DIR", "")
+	if got := DemoDataDir(); got != ".conduitvpn-demo" {
+		t.Fatalf("default demo data dir = %q", got)
+	}
+	t.Setenv("CONDUIT_DATA_DIR", "/tmp/conduit-demo")
+	if got := DemoDataDir(); got != "/tmp/conduit-demo" {
+		t.Fatalf("explicit demo data dir = %q", got)
+	}
+}
+
 func TestParseProxyValue(t *testing.T) {
 	cases := []struct {
 		name       string

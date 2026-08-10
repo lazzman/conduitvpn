@@ -146,6 +146,16 @@ func Load() Config {
 	}
 }
 
+// DemoDataDir returns the isolated data directory used by --demo. An
+// explicitly configured data directory still wins so callers can retain demo
+// state between runs when needed.
+func DemoDataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("CONDUIT_DATA_DIR")); dir != "" {
+		return dir
+	}
+	return ".conduitvpn-demo"
+}
+
 // UpstreamProxy is an HTTP or SOCKS5 proxy used for fetching the node
 // list when the VPNGate API is blocked on the direct path.
 type UpstreamProxy struct {

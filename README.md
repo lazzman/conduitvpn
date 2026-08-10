@@ -130,6 +130,16 @@ docker run -d --name conduitvpn \
 
 镜像发布在 GitHub Container Registry，CI 每次推送自动构建 amd64/arm64。
 
+### UI 演示模式
+
+本地调试前端或演示管理后台时，可不安装 OpenVPN、无需 TUN 设备直接启动：
+
+```bash
+go run ./cmd/conduitvpn --demo
+```
+
+demo 模式只启动 Web UI，并使用模拟节点、状态、日志和路由操作；不会创建 VPN 隧道，也不提供 HTTP、SOCKS5 或 hysteria2 代理服务。首次运行默认将数据写入 `./.conduitvpn-demo`，后台账号为 `admin`、密码为 `demo`；启动日志会输出随机安全后缀访问地址。可通过 `CONDUIT_DATA_DIR`、`UI_USER`、`UI_PASSWORD` 覆盖这些默认值。
+
 ---
 
 ## 🖥️ 使用指南

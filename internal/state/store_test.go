@@ -28,6 +28,28 @@ func TestEnsureAuthGeneratesCreds(t *testing.T) {
 	}
 }
 
+func TestEnsureAuthWithDefaults(t *testing.T) {
+	s := NewStore(t.TempDir())
+	u, p, err := s.EnsureAuthWithDefaults("admin", "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != "admin" || p != "demo" {
+		t.Fatalf("generated credentials = %q/%q", u, p)
+	}
+	_, _, err = s.EnsureAuthWithDefaults("other", "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := s.LoadAuth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.Username != "admin" || auth.Password != "demo" {
+		t.Fatalf("existing credentials were overwritten: %+v", auth)
+	}
+}
+
 func TestRandomCredShape(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		c := randomCred(12)

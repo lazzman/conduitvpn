@@ -86,6 +86,17 @@ func (s *Store) AuthPath() string { return filepath.Join(s.dir, "ui_auth.json") 
 // freshly created it returns the generated username/password so the
 // startup log can surface them.
 func (s *Store) EnsureAuth() (genUser, genPass string, err error) {
+	return s.ensureAuth("", "")
+}
+
+// EnsureAuthWithDefaults initializes absent credentials with the supplied
+// defaults. Existing credentials are retained, including a previously
+// generated secret path.
+func (s *Store) EnsureAuthWithDefaults(username, password string) (genUser, genPass string, err error) {
+	return s.ensureAuth(username, password)
+}
+
+func (s *Store) ensureAuth(defaultUser, defaultPass string) (genUser, genPass string, err error) {
 	auth, err := s.LoadAuth()
 	fresh := false
 	if auth.SecretPath == "" {
@@ -93,11 +104,19 @@ func (s *Store) EnsureAuth() (genUser, genPass string, err error) {
 		fresh = true
 	}
 	if auth.Username == "" {
-		auth.Username = randomCred(12)
+		if defaultUser != "" {
+			auth.Username = defaultUser
+		} else {
+			auth.Username = randomCred(12)
+		}
 		fresh = true
 	}
 	if auth.Password == "" {
-		auth.Password = randomCred(12)
+		if defaultPass != "" {
+			auth.Password = defaultPass
+		} else {
+			auth.Password = randomCred(12)
+		}
 		fresh = true
 	}
 	if err := writeJSON(s.AuthPath(), auth); err != nil {
