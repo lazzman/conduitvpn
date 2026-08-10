@@ -34,6 +34,12 @@ type Config struct {
 	UpstreamSingboxIndex  int
 	UpstreamSingboxPort   int
 
+	// hy2 inbound gateway on the proxy path (0 = disabled)
+	HY2Port         int
+	HY2Bind         string
+	HY2Password     string
+	HY2ObfsPassword string
+
 	// Tunnel (M2)
 	ConnectTimeout    time.Duration
 	ProbeSettle       time.Duration
@@ -101,6 +107,11 @@ func Load() Config {
 		UpstreamSingboxConfig: envStr("UPSTREAM_SINGBOX_CONFIG", ""),
 		UpstreamSingboxIndex:  envInt("UPSTREAM_SINGBOX_INDEX", 0),
 		UpstreamSingboxPort:   envInt("UPSTREAM_SINGBOX_PORT", 10800),
+
+		HY2Port:         envInt("HY2_PORT", 0),
+		HY2Bind:         envStr("HY2_BIND", "0.0.0.0"),
+		HY2Password:     envStr("HY2_PASSWORD", ""),
+		HY2ObfsPassword: envStr("HY2_OBFS_PASSWORD", ""),
 
 		ConnectTimeout:    time.Duration(envInt("CONNECT_TIMEOUT_SECONDS", 40)) * time.Second,
 		ProbeSettle:       time.Duration(envInt("PROBE_SETTLE_SECONDS", 2)) * time.Second,

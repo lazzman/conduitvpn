@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"conduitvpn/internal/config"
+	"conduitvpn/internal/hy2"
 	"conduitvpn/internal/logx"
 	"conduitvpn/internal/manager"
 	"conduitvpn/internal/netfix"
@@ -39,10 +41,29 @@ func main() {
 
 	// 方案 B 回包路由修复：入站 UI/代理连接的响应走 docker 网关，
 	// 出站代理流量仍走 VPN。失败不影响主流程（仅入站回包降级）。
-	if err := netfix.Apply([]string{fmt.Sprint(cfg.UIPort), fmt.Sprint(cfg.LocalProxyPort)}); err != nil {
+	udpPorts := []string{}
+	if cfg.HY2Port > 0 {
+		udpPorts = append(udpPorts, fmt.Sprint(cfg.HY2Port))
+	}
+	if err := netfix.Apply([]string{fmt.Sprint(cfg.UIPort), fmt.Sprint(cfg.LocalProxyPort)}, udpPorts); err != nil {
 		logx.Warn("netfix skipped", "err", err)
 	} else {
-		logx.Info("netfix applied", "ports", fmt.Sprint(cfg.UIPort)+","+fmt.Sprint(cfg.LocalProxyPort))
+		logx.Info("netfix applied", "tcp", fmt.Sprint(cfg.UIPort)+","+fmt.Sprint(cfg.LocalProxyPort), "udp", strings.Join(udpPorts, ","))
+	}
+
+	// hy2 inbound gateway (hysteria2 clients → 方案 B tunnel)
+	if cfg.HY2Port > 0 {
+		hy2Runner, err := hy2.Start(ctx, cfg.DataDir, hy2.Config{
+			Port:     cfg.HY2Port,
+			Bind:     cfg.HY2Bind,
+			Password: cfg.HY2Password,
+			ObfsPass: cfg.HY2ObfsPassword,
+		})
+		if err != nil {
+			logx.Error("hy2 start failed", "err", err)
+			os.Exit(1)
+		}
+		defer hy2Runner.Stop()
 	}
 
 	store := state.NewStore(cfg.DataDir)

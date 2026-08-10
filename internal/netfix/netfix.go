@@ -23,26 +23,31 @@ const table = "101"
 
 // Apply is idempotent: it only adds rules that are missing. Failures are
 // logged as warnings — the app still runs, only inbound replies degrade.
-func Apply(ports []string) error {
+// tcpPorts/udpPorts are the service ports whose reply traffic must go via
+// the docker bridge instead of the tunnel.
+func Apply(tcpPorts, udpPorts []string) error {
 	gw, dev, err := defaultGateway()
 	if err != nil {
 		return err
 	}
-	portSpec := strings.Join(ports, ",")
 
-	// iptables: mark inbound service connections, then mark their replies.
-	// Note: -t mangle must precede -C/-A (iptables consumes the next token
-	// as the chain name).
-	for _, rule := range [][]string{
-		{"PREROUTING", "-i", dev, "-p", "tcp", "-m", "multiport", "--dports", portSpec, "-j", "CONNMARK", "--set-mark", mark},
-		{"OUTPUT", "-m", "connmark", "--mark", mark, "-j", "MARK", "--set-mark", mark},
-	} {
+	enable := func(rule []string) {
 		if err := exec.Command("iptables", append([]string{"-t", "mangle", "-C"}, rule...)...).Run(); err != nil {
 			if cerr := exec.Command("iptables", append([]string{"-t", "mangle", "-A"}, rule...)...).Run(); cerr != nil {
 				logx.Warn("netfix iptables add failed", "rule", strings.Join(rule, " "), "err", cerr)
 			}
 		}
 	}
+
+	// mark inbound service connections (TCP + optional UDP), then mark
+	// their replies.
+	if len(tcpPorts) > 0 {
+		enable([]string{"PREROUTING", "-i", dev, "-p", "tcp", "-m", "multiport", "--dports", strings.Join(tcpPorts, ","), "-j", "CONNMARK", "--set-mark", mark})
+	}
+	if len(udpPorts) > 0 {
+		enable([]string{"PREROUTING", "-i", dev, "-p", "udp", "-m", "multiport", "--dports", strings.Join(udpPorts, ","), "-j", "CONNMARK", "--set-mark", mark})
+	}
+	enable([]string{"OUTPUT", "-m", "connmark", "--mark", mark, "-j", "MARK", "--set-mark", mark})
 
 	// ip: route marked replies via the docker gateway.
 	if err := exec.Command("ip", "rule", "add", "fwmark", mark, "table", table, "pref", "100").Run(); err != nil {

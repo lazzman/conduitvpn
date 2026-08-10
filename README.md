@@ -23,6 +23,7 @@
 | **隧道内 DNS** | 出站域名解析走固定公共 DNS（默认 8.8.8.8），经 VPN 出口，不依赖容器 resolv.conf |
 | **上游代理拉取** | VPNGate API 被墙/污染时，可经 HTTP/SOCKS5 上游代理拉取节点（支持 Basic 认证） |
 | **sing-box 上游** | 支持 vmess/vless/trojan/ss/hysteria2 等协议的**单个代理 URI** 或**订阅链接**，由内置 sing-box 引擎起本地网关 |
+| **hy2 入站** | 可选 hysteria2 入站网关：外部 hy2 客户端连入后流量同样经 VPN 隧道出口 |
 | **单静态二进制** | `CGO_ENABLED=0` 交叉编译，Docker 镜像 ~21MB，含 openvpn 之外的运行时依赖全内置 |
 
 ---
@@ -135,6 +136,17 @@ curl --socks5 127.0.0.1:7928 https://api.ipify.org
 
 代理端口默认仅绑定宿主机回环（`-p 127.0.0.1:7928:7928`），不对外暴露。
 
+### hy2 入站（可选，给远程客户端用）
+
+```bash
+# 部署时启用（install.sh）
+HY2_PORT=7929 HY2_PASSWORD=你的密码 bash install.sh
+
+# 客户端（sing-box / Clash Meta / NekoRay 等）配置示例
+# server: 你的VPS, port: 7929, 协议: hysteria2, password: 你的密码, 跳过证书校验
+```
+hy2 客户端连入后，流量经 方案 B 隧道从 VPN 节点出口。
+
 ### 路由模式 API
 
 ```bash
@@ -198,6 +210,11 @@ curl -X PUT -H 'Content-Type: application/json' \
 | `UPSTREAM_SINGBOX_INDEX` | `0` | 订阅节点序号（可负值取倒数） |
 | `UPSTREAM_SINGBOX_CONFIG` | 空 | sing-box 完整配置（路径或内联 JSON，需含 socks inbound） |
 | `UPSTREAM_SINGBOX_PORT` | `10800` | 本地 socks 监听端口 |
+| **hy2 入站（可选）** | | |
+| `HY2_PORT` | `0` | hysteria2 入站端口（UDP，0=关闭） |
+| `HY2_PASSWORD` | 空 | hy2 客户端密码（启用时必填） |
+| `HY2_BIND` | `0.0.0.0` | 监听地址 |
+| `HY2_OBFS_PASSWORD` | 空 | 可选 salamander 混淆密码 |
 | **Web UI** | | |
 | `UI_HOST` / `UI_PORT` | `0.0.0.0:8787` | 管理后台 |
 

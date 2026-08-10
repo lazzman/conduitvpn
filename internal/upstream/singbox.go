@@ -13,10 +13,12 @@ import (
 )
 
 // Runner supervises the sing-box subprocess: spawn → wait for the local
-// SOCKS5 listener → restart on unexpected exit.
+// listener → restart on unexpected exit. udp marks hysteria2-style
+// inbound-only processes (no TCP port to probe).
 type Runner struct {
 	cfgPath string
 	port    int
+	udp     bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -42,6 +44,27 @@ func StartRunner(ctx context.Context, cfgPath string, port int) (*Runner, error)
 		return nil, err
 	}
 	logx.Info("sing-box upstream ready", "port", port)
+	go r.watch()
+	return r, nil
+}
+
+// StartRunnerUDP spawns sing-box whose inbound is UDP-only (e.g.
+// hysteria2); readiness is confirmed by process liveness since there is
+// no TCP port to probe.
+func StartRunnerUDP(ctx context.Context, cfgPath string, port int) (*Runner, error) {
+	r := &Runner{cfgPath: cfgPath, port: port, udp: true}
+	r.ctx, r.cancel = context.WithCancel(ctx)
+	if out, err := exec.Command("sing-box", "check", "-c", cfgPath).CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("sing-box check failed: %w: %s", err, truncate(string(out), 300))
+	}
+	if err := r.spawn(); err != nil {
+		return nil, err
+	}
+	if err := r.waitReady(15 * time.Second); err != nil {
+		r.Stop()
+		return nil, err
+	}
+	logx.Info("sing-box udp inbound ready", "port", port)
 	go r.watch()
 	return r, nil
 }
@@ -79,10 +102,19 @@ func (r *Runner) waitReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	addr := fmt.Sprintf("127.0.0.1:%d", r.port)
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			return nil
+		if r.udp {
+			r.mu.Lock()
+			alive := r.proc != nil && r.proc.Process != nil && r.proc.ProcessState == nil
+			r.mu.Unlock()
+			if alive {
+				return nil
+			}
+		} else {
+			conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
+			if err == nil {
+				_ = conn.Close()
+				return nil
+			}
 		}
 		select {
 		case <-r.ctx.Done():
