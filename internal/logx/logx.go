@@ -51,7 +51,11 @@ func emit(l Level, lvl, msg string, kv ...any) {
 	}
 	e := map[string]any{"ts": time.Now().Format(time.RFC3339), "lvl": lvl, "msg": msg}
 	for i := 0; i+1 < len(kv); i += 2 {
-		e[fmt.Sprint(kv[i])] = kv[i+1]
+		v := kv[i+1]
+		if err, ok := v.(error); ok {
+			v = err.Error() // errors have no exported fields; log the message
+		}
+		e[fmt.Sprint(kv[i])] = v
 	}
 	line, _ := json.Marshal(e)
 

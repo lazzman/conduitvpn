@@ -19,6 +19,17 @@ type Config struct {
 	BenchConcurrency int
 	BenchTimeout     time.Duration
 	LogLevel         string
+
+	// Tunnel (M2)
+	ConnectTimeout    time.Duration
+	ProbeSettle       time.Duration
+	ProbeInterval     time.Duration
+	ProbeTimeout      time.Duration
+	HealthMaxFails    int
+	InitialProbeTries int
+	HealthAddr        string
+	OpenVPNAuthUser   string
+	OpenVPNAuthPass   string
 }
 
 func envStr(key, def string) string {
@@ -48,5 +59,15 @@ func Load() Config {
 		BenchConcurrency: envInt("BENCH_CONCURRENCY", 50),
 		BenchTimeout:     time.Duration(envInt("BENCH_TIMEOUT_SECONDS", 10)) * time.Second,
 		LogLevel:         envStr("LOG_LEVEL", "info"),
+
+		ConnectTimeout:    time.Duration(envInt("CONNECT_TIMEOUT_SECONDS", 40)) * time.Second,
+		ProbeSettle:       time.Duration(envInt("PROBE_SETTLE_SECONDS", 2)) * time.Second,
+		ProbeInterval:     time.Duration(envInt("PROBE_INTERVAL_SECONDS", 5)) * time.Second,
+		ProbeTimeout:      time.Duration(envInt("PROBE_TIMEOUT_SECONDS", 5)) * time.Second,
+		HealthMaxFails:    envInt("HEALTH_MAX_FAILS", 3),
+		InitialProbeTries: envInt("INITIAL_PROBE_TRIES", 3),
+		HealthAddr:        envStr("HEALTH_ADDR", "8.8.8.8:443"),
+		OpenVPNAuthUser:   envStr("OPENVPN_AUTH_USER", "vpn"),
+		OpenVPNAuthPass:   envStr("OPENVPN_AUTH_PASS", "vpn"),
 	}
 }

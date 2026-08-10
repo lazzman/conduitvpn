@@ -30,6 +30,26 @@ func (s *Store) LoadNodes() ([]*node.Node, error) {
 	return nodes, nil
 }
 
+// BlacklistEntry records why and when a node was blacklisted.
+type BlacklistEntry struct {
+	Reason   string `json:"reason"`
+	MarkedAt string `json:"marked_at"`
+}
+
+func (s *Store) BlacklistPath() string { return filepath.Join(s.dir, "blacklist.json") }
+
+func (s *Store) SaveBlacklist(bl map[string]BlacklistEntry) error {
+	return writeJSON(s.BlacklistPath(), bl)
+}
+
+func (s *Store) LoadBlacklist() (map[string]BlacklistEntry, error) {
+	bl := map[string]BlacklistEntry{}
+	if err := readJSON(s.BlacklistPath(), &bl); err != nil {
+		return nil, err
+	}
+	return bl, nil
+}
+
 func writeJSON(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
