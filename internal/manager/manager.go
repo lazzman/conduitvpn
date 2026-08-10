@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"net"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -281,11 +282,15 @@ func (m *Manager) connectAndVerify(ctx context.Context, n *node.Node) error {
 
 // monitor runs the liveness loop while connected: HTTPS probe every
 // interval; N consecutive failures or an unexpected openvpn exit drift.
+// A separate ticker measures the current node's live TCP latency for
+// the dashboard chart.
 func (m *Manager) monitor(ctx context.Context, n *node.Node) error {
 	m.setState(StateConnected, n.HostName)
 	fails := 0
 	ticker := time.NewTicker(m.cfg.ProbeInterval)
 	defer ticker.Stop()
+	latTicker := time.NewTicker(m.cfg.LatencyInterval)
+	defer latTicker.Stop()
 
 	tunEvents := m.tun.Events()
 	for {
@@ -314,8 +319,32 @@ func (m *Manager) monitor(ctx context.Context, n *node.Node) error {
 				}
 				fails = 0
 			}
+		case <-latTicker.C:
+			m.measureLiveLatency(ctx, n)
 		}
 	}
+}
+
+// measureLiveLatency measures TCP connect time to the node's remote
+// endpoint through the tunnel and updates the dashboard value.
+func (m *Manager) measureLiveLatency(ctx context.Context, n *node.Node) {
+	d := net.Dialer{Timeout: 3 * time.Second}
+	start := time.Now()
+	conn, err := d.DialContext(ctx, "tcp", n.RemoteAddr())
+	if err != nil {
+		return // node's port may be UDP-only; keep the last value
+	}
+	_ = conn.Close()
+	ms := int(time.Since(start).Milliseconds())
+	if ms < 1 {
+		ms = 1
+	}
+	m.mu.Lock()
+	if m.current != nil && m.current.HostName == n.HostName {
+		m.current.LatencyMS = ms
+	}
+	m.mu.Unlock()
+	logx.Debug("live latency", "host", n.HostName, "ms", ms)
 }
 
 // --- helpers ---

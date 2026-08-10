@@ -61,10 +61,24 @@
         <button class="seg-btn" data-mode="country" role="tab">固定国家</button>
         <button class="seg-btn" data-mode="fixed" role="tab">固定 IP</button>
       </div>
-      <input id="route-country" class="input" placeholder="国家码，如 JP / KR / US" maxlength="16" autocomplete="off" hidden>
-      <input id="route-node" class="input input-wide" placeholder="节点 hostname 或 IP" autocomplete="off" hidden>
+      <select id="route-country" class="input" hidden>
+        <option value="">选择国家…</option>
+      </select>
+      <select id="route-node" class="input input-wide" hidden>
+        <option value="">选择节点…</option>
+      </select>
       <button id="btn-route-apply" class="btn">应用</button>
       <span id="route-msg" class="route-msg"></span>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="实时延迟">
+    <div class="panel-head">
+      <h2>实时延迟</h2>
+      <span id="lat-summary" class="card-sub mono">—</span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="lat-chart" height="150"></canvas>
     </div>
   </section>
 

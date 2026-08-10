@@ -47,6 +47,9 @@ type Config struct {
 	RouteMode    string
 	RouteCountry string
 	RouteNode    string
+
+	// Live latency (M7)
+	LatencyInterval time.Duration
 }
 
 func envStr(key, def string) string {
@@ -100,5 +103,7 @@ func Load() Config {
 		RouteMode:    envStr("ROUTE_MODE", "auto"),
 		RouteCountry: envStr("ROUTE_COUNTRY", ""),
 		RouteNode:    envStr("ROUTE_NODE", ""),
+
+		LatencyInterval: time.Duration(envInt("LATENCY_INTERVAL_SECONDS", 10)) * time.Second,
 	}
 }

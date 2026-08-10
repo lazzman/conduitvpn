@@ -17,6 +17,7 @@ function applyTheme(t) {
 themeBtn.addEventListener("click", () => {
   applyTheme(theme === "dark" ? "light" : "dark");
   localStorage.setItem("conduit-theme", theme);
+  drawChart();
 });
 applyTheme(theme);
 
@@ -79,13 +80,42 @@ let filterText = "";
 const COUNTRY_LONG = {
   JP: "日本", KR: "韩国", US: "美国", GB: "英国", DE: "德国", FR: "法国", NL: "荷兰",
   SG: "新加坡", CA: "加拿大", AU: "澳大利亚", HK: "香港", TW: "台湾", SE: "瑞典", FI: "芬兰",
+  TH: "泰国", IN: "印度", VN: "越南", MY: "马来西亚", ID: "印尼", PH: "菲律宾",
+  IT: "意大利", ES: "西班牙", CH: "瑞士", PL: "波兰", RO: "罗马尼亚", TR: "土耳其",
+  BR: "巴西", MX: "墨西哥", AR: "阿根廷", RU: "俄罗斯", UA: "乌克兰", CZ: "捷克",
+  NO: "挪威", DK: "丹麦", IE: "爱尔兰", PT: "葡萄牙", BE: "比利时", AT: "奥地利",
+  GR: "希腊", IL: "以色列", AE: "阿联酋", SA: "沙特", NZ: "新西兰", ZA: "南非",
+  EE: "爱沙尼亚", LV: "拉脱维亚", LT: "立陶宛", BG: "保加利亚", HU: "匈牙利",
 };
 
 function loadNodes() {
   fetch("./api/nodes")
     .then((r) => r.json())
-    .then((list) => { nodes = list; renderTable(); })
+    .then((list) => { nodes = list; renderTable(); populateRouteSelects(); })
     .catch(() => {});
+}
+
+function populateRouteSelects() {
+  // country dropdown: distinct countries, sorted by code
+  const cc = $("route-country");
+  const seen = {};
+  nodes.forEach((n) => { if (n.country_short) seen[n.country_short] = true; });
+  const codes = Object.keys(seen).sort();
+  cc.innerHTML = '<option value="">选择国家…</option>' + codes.map((c) =>
+    `<option value="${c}">${c} · ${COUNTRY_LONG[c] || (nodes.find(n => n.country_short === c)?.country_long || c)}</option>`
+  ).join("");
+  if (routeCfg.mode === "country" && routeCfg.country) cc.value = routeCfg.country;
+
+  // node dropdown: hostname · latency · ping, sorted by latency
+  const nn = $("route-node");
+  const rows = nodes
+    .map((n) => ({ n, lat: n.tested && n.latency_ms > 0 ? n.latency_ms : Infinity }))
+    .sort((a, b) => a.lat - b.lat);
+  nn.innerHTML = '<option value="">选择节点…</option>' + rows.map(({ n, lat }) => {
+    const latTxt = lat === Infinity ? "—" : `${lat}ms`;
+    return `<option value="${n.host_name}" data-ip="${n.ip}">${n.host_name} · ${latTxt} · ping ${n.ping ?? "—"}</option>`;
+  }).join("");
+  if (routeCfg.mode === "fixed" && routeCfg.node) nn.value = routeCfg.node;
 }
 
 function renderTable() {
@@ -176,9 +206,9 @@ function renderRoute() {
   });
   $("route-country").hidden = routeCfg.mode !== "country";
   $("route-node").hidden = routeCfg.mode !== "fixed";
-  $("route-country").value = routeCfg.country || "";
-  $("route-node").value = routeCfg.node || "";
-  const detail = routeCfg.mode === "country" ? " · " + routeCfg.country
+  if (routeCfg.country) $("route-country").value = routeCfg.country;
+  if (routeCfg.node) $("route-node").value = routeCfg.node;
+  const detail = routeCfg.mode === "country" ? " · " + (COUNTRY_LONG[routeCfg.country] || routeCfg.country)
     : routeCfg.mode === "fixed" ? " · " + routeCfg.node : "";
   $("route-status").textContent = (ROUTE_LABEL[routeCfg.mode] || routeCfg.mode) + detail;
 }
@@ -191,7 +221,11 @@ function loadRoute() {
 }
 
 function setRoute(mode, country, node) {
-  const body = { mode, country: country || routeCfg.country, node: node || routeCfg.node };
+  const body = {
+    mode,
+    country: country !== undefined ? country : (mode === "country" ? $("route-country").value : routeCfg.country),
+    node: node !== undefined ? node : (mode === "fixed" ? $("route-node").value : routeCfg.node),
+  };
   $("route-msg").textContent = "应用中…";
   fetch("./api/route", {
     method: "PUT",
@@ -223,10 +257,115 @@ document.querySelectorAll("#route-seg .seg-btn").forEach((btn) => {
 
 $("btn-route-apply").addEventListener("click", () => {
   const mode = document.querySelector("#route-seg .seg-btn.active").dataset.mode;
-  setRoute(mode, $("route-country").value.trim().toUpperCase(), $("route-node").value.trim());
+  setRoute(mode);
 });
 
+/* ---- real-time latency chart ---- */
+const CHART_POINTS = 60; // ~2min at 2s state cadence
+let latSeries = [];
+let latMin = null, latMax = null;
+
+function pushLatency(ms) {
+  const v = (ms && ms > 0) ? ms : null;
+  latSeries.push(v);
+  if (latSeries.length > CHART_POINTS) latSeries.shift();
+  const vals = latSeries.filter((x) => x != null);
+  latMin = vals.length ? Math.min(...vals) : null;
+  latMax = vals.length ? Math.max(...vals) : null;
+  drawChart();
+  const last = vals[vals.length - 1];
+  const node = (routeCfg && routeCfg.mode === "fixed") ? "" : "";
+  $("lat-summary").textContent = last != null
+    ? `当前 ${last}ms · 峰值 ${latMax}ms · 采样 ${vals.length}`
+    : (vals.length ? "等待采样…" : "暂无数据");
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function drawChart() {
+  const cv = $("lat-chart");
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (w === 0) return;
+  cv.width = w * dpr;
+  cv.height = h * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const pad = { top: 8, right: 8, bottom: 16, left: 8 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  if (plotW <= 0 || plotH <= 0) return;
+
+  const vals = latSeries.filter((x) => x != null);
+  const max = Math.max(120, ...vals, 1) * 1.15;
+  const border = cssVar("--border") || "#1e1e24";
+  const accent = cssVar("--accent") || "#34d399";
+  const text2 = cssVar("--text-3") || "#5c5c68";
+
+  // grid + labels
+  ctx.font = "9px ui-monospace, monospace";
+  ctx.fillStyle = text2;
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 2; g++) {
+    const y = pad.top + (g / 2) * plotH;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(w - pad.right, y);
+    ctx.stroke();
+    const label = Math.round(max * (1 - g / 2));
+    ctx.fillText(`${label}ms`, pad.left + 2, y - 2);
+  }
+
+  // baseline at current value
+  const lastVal = vals[vals.length - 1];
+  if (lastVal != null) {
+    const y = pad.top + plotH - (lastVal / max) * plotH;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = accent;
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(w - pad.right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  // series line
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  let started = false;
+  for (let i = 0; i < latSeries.length; i++) {
+    const v = latSeries[i];
+    if (v == null) { started = false; continue; }
+    const x = pad.left + (i / (CHART_POINTS - 1)) * plotW;
+    const y = pad.top + plotH - (v / max) * plotH;
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // last point dot
+  if (lastVal != null) {
+    const x = pad.left + ((latSeries.length - 1) / (CHART_POINTS - 1)) * plotW;
+    const y = pad.top + plotH - (lastVal / max) * plotH;
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 /* ---- logs ---- */
+
 
 let logLevel = "all";
 let follow = true;
@@ -316,6 +455,8 @@ function connectStream() {
         appendLog(msg.payload);
       } else if (msg.type === "state") {
         renderState(msg.payload);
+        const cn = msg.payload.current_node;
+        pushLatency(cn ? cn.latency_ms : null);
       }
     } catch (_) {}
   };
@@ -328,10 +469,30 @@ function connectStream() {
 /* ---- boot ---- */
 fetch("./api/state")
   .then((r) => r.json())
-  .then((snap) => { renderState(snap); setInterval(() => {
-    $("c-uptime").textContent = fmtUptime(Date.now() / 1000 - bootTs);
-  }, 1000); })
+  .then((snap) => {
+    renderState(snap);
+    const cn = snap.current_node;
+    pushLatency(cn ? cn.latency_ms : null);
+  })
   .catch(() => {});
+
+// uptime ticker
+setInterval(() => {
+  $("c-uptime").textContent = fmtUptime(Date.now() / 1000 - bootTs);
+}, 1000);
+
+// state poller: keeps status + latency chart dense even when proxies
+// throttle the SSE stream (e.g. Cloudflare buffering).
+setInterval(() => {
+  fetch("./api/state")
+    .then((r) => r.json())
+    .then((snap) => {
+      renderState(snap);
+      const cn = snap.current_node;
+      pushLatency(cn ? cn.latency_ms : null);
+    })
+    .catch(() => {});
+}, 3000);
 
 loadNodes();
 loadLogs();

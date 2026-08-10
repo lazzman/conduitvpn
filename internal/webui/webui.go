@@ -28,7 +28,7 @@ var staticFS embed.FS
 // assetVersion busts proxy caches: bump it whenever the static assets
 // change (Cloudflare overrides our no-cache with a 4h browser TTL, so
 // the query string is the only reliable invalidation).
-const assetVersion = "6"
+const assetVersion = "8"
 
 type Server struct {
 	cfg    config.Config
@@ -257,7 +257,10 @@ func (s *Server) apiLogStream(w http.ResponseWriter, r *http.Request) {
 		case entry := <-sub:
 			send("log", entry)
 		case <-ticker.C:
-			send("state", s.mgr.Snapshot())
+			// sanitize every snapshot — never leak the raw OpenVPN config
+			s := s.mgr.Snapshot()
+			s.CurrentNode = sanitizeNode(s.CurrentNode)
+			send("state", s)
 		}
 	}
 }
