@@ -15,7 +15,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"aimilivpn/internal/logx"
+	"conduitvpn/internal/logx"
 )
 
 const mark = "0x1"

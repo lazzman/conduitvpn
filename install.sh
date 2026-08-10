@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# AimiliVPN 一键部署（Docker 版，~50 行，对比 Python 原版 1184 行）
+# ConduitVPN 一键部署（Docker 版，~50 行，对比 Python 原版 1184 行）
 set -euo pipefail
 
-IMAGE="aimilivpn:latest"
-NAME="aimilivpn"
+IMAGE="conduitvpn:latest"
+NAME="conduitvpn"
 UI_PORT="${UI_PORT:-8787}"
 PROXY_PORT="${PROXY_PORT:-7928}"
-DATA_DIR="${DATA_DIR:-/data/aimilivpn}"
+DATA_DIR="${DATA_DIR:-/data/conduitvpn}"
 PROXY_HOST="${PROXY_HOST:-127.0.0.1}"   # 代理端口默认只绑本机回环
 UI_HOST="${UI_HOST:-0.0.0.0}"           # 管理后台可公网访问（有随机后缀保护）
 
@@ -26,7 +26,7 @@ docker run -d \
   --restart unless-stopped \
   --cap-add=NET_ADMIN \
   --device=/dev/net/tun \
-  -v "$DATA_DIR:/data/aimilivpn" \
+  -v "$DATA_DIR:/data/conduitvpn" \
   -p "$UI_HOST:$UI_PORT:8787" \
   -p "$PROXY_HOST:$PROXY_PORT:7928" \
   -e LOCAL_PROXY_PORT=7928 \

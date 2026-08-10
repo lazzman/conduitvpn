@@ -5,7 +5,7 @@ IMAGE ?= golang:1.22-alpine
 
 build:
 	docker run --rm -v $(PWD):/src -w /src $(IMAGE) \
-		sh -c "CGO_ENABLED=0 go build -trimpath -o /src/aimilivpn ./cmd/aimilivpn"
+		sh -c "CGO_ENABLED=0 go build -trimpath -o /src/conduitvpn ./cmd/conduitvpn"
 
 test:
 	docker run --rm -v $(PWD):/src -w /src $(IMAGE) go test ./...
@@ -14,7 +14,7 @@ vet:
 	docker run --rm -v $(PWD):/src -w /src $(IMAGE) go vet ./...
 
 run: build
-	./aimilivpn
+	./conduitvpn
 
 clean:
-	rm -f aimilivpn
+	rm -f conduitvpn

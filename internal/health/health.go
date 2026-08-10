@@ -46,7 +46,7 @@ func (p *Prober) Check(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "aimilivpn/0.1 health")
+	req.Header.Set("User-Agent", "conduitvpn/0.1 health")
 
 	resp, err := p.client.Do(req)
 	if err != nil {

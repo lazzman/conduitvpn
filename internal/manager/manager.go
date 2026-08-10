@@ -15,14 +15,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"aimilivpn/internal/benchmark"
-	"aimilivpn/internal/config"
-	"aimilivpn/internal/health"
-	"aimilivpn/internal/logx"
-	"aimilivpn/internal/node"
-	"aimilivpn/internal/state"
-	"aimilivpn/internal/tunnel"
-	"aimilivpn/internal/vpngate"
+	"conduitvpn/internal/benchmark"
+	"conduitvpn/internal/config"
+	"conduitvpn/internal/health"
+	"conduitvpn/internal/logx"
+	"conduitvpn/internal/node"
+	"conduitvpn/internal/state"
+	"conduitvpn/internal/tunnel"
+	"conduitvpn/internal/vpngate"
 )
 
 type State string

@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"aimilivpn/internal/logx"
-	"aimilivpn/internal/node"
+	"conduitvpn/internal/logx"
+	"conduitvpn/internal/node"
 )
 
 func Run(ctx context.Context, nodes []*node.Node, concurrency int, timeout time.Duration) {

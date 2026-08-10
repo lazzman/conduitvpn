@@ -1,6 +1,6 @@
-# conduit
+# conduitvpn
 
-Conduit — VPNGate 代理网关管理器（Go 重写版，原品牌 AimiliVPN）。
+ConduitVPN — VPNGate 代理网关管理器（Go 重写版，零第三方依赖）。
 
 架构决策（grilling session 锁定）：
 
@@ -16,16 +16,16 @@ Conduit — VPNGate 代理网关管理器（Go 重写版，原品牌 AimiliVPN�
 一次性 CLI：拉取 VPNGate 节点 → CSV 解析 → 并发测速 → 持久化 nodes.json → 打印 Top 5。
 
 ```bash
-go run ./cmd/aimilivpn
-# 或指定数据目录（默认 /data/aimilivpn）
-AIMILI_DATA_DIR=/tmp/aimilivpn go run ./cmd/aimilivpn
+go run ./cmd/conduitvpn
+# 或指定数据目录（默认 /data/conduitvpn）
+CONDUIT_DATA_DIR=/tmp/conduitvpn go run ./cmd/conduitvpn
 ```
 
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `AIMILI_DATA_DIR` | `/data/aimilivpn` | 数据目录 |
+| `CONDUIT_DATA_DIR` | `/data/conduitvpn` | 数据目录 |
 | `VPNGATE_API_URL` | `https://www.vpngate.net/api/iphone/` | 节点源 |
 | `FETCH_TIMEOUT_SECONDS` | `30` | 拉取超时 |
 | `MAX_SCAN_ROWS` | `300` | 测速窗口 |

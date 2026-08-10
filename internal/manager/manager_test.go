@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"aimilivpn/internal/config"
-	"aimilivpn/internal/node"
+	"conduitvpn/internal/config"
+	"conduitvpn/internal/node"
 )
 
 func testManager(t *testing.T, mode, country, node string) *Manager {

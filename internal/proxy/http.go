@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"aimilivpn/internal/logx"
+	"conduitvpn/internal/logx"
 )
 
 // handleHTTP serves an HTTP proxy request: CONNECT tunneling or
@@ -24,7 +24,7 @@ func (s *Server) handleHTTP(client net.Conn, br *bufio.Reader) {
 	}
 	if s.authOn && !s.checkHTTPAuth(req) {
 		_, _ = client.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\n" +
-			"Proxy-Authenticate: Basic realm=\"aimilivpn\"\r\nContent-Length: 0\r\n\r\n"))
+			"Proxy-Authenticate: Basic realm=\"conduitvpn\"\r\nContent-Length: 0\r\n\r\n"))
 		return
 	}
 

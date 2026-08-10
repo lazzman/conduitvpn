@@ -1,4 +1,4 @@
-// AimiliVPN — VPNGate 代理网关管理器（Go 重写版）。
+// ConduitVPN — VPNGate 代理网关管理器（Go 重写版）。
 // 守护进程：proxy（单端口双协议）+ manager（隧道监督）+ webui（管理后台）。
 package main
 
@@ -9,14 +9,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"aimilivpn/internal/config"
-	"aimilivpn/internal/logx"
-	"aimilivpn/internal/manager"
-	"aimilivpn/internal/netfix"
-	"aimilivpn/internal/proxy"
-	"aimilivpn/internal/state"
-	"aimilivpn/internal/tunnel"
-	"aimilivpn/internal/webui"
+	"conduitvpn/internal/config"
+	"conduitvpn/internal/logx"
+	"conduitvpn/internal/manager"
+	"conduitvpn/internal/netfix"
+	"conduitvpn/internal/proxy"
+	"conduitvpn/internal/state"
+	"conduitvpn/internal/tunnel"
+	"conduitvpn/internal/webui"
 )
 
 func main() {
@@ -64,10 +64,10 @@ func main() {
 	defer ui.Close()
 	logx.Info("webui listening", "addr", ui.Addr().String(), "path", "/"+ui.SecretPath())
 
-	logx.Info("aimilivpn starting", "data_dir", cfg.DataDir)
+	logx.Info("conduitvpn starting", "data_dir", cfg.DataDir)
 	if err := m.Run(ctx); err != nil && ctx.Err() == nil {
 		logx.Error("manager exited", "err", err)
 		os.Exit(1)
 	}
-	logx.Info("aimilivpn stopped")
+	logx.Info("conduitvpn stopped")
 }

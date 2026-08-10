@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"aimilivpn/internal/node"
+	"conduitvpn/internal/node"
 )
 
 // VPNGate API layout: a leading "*vpn_servers" line, a "#HostName,IP,..."

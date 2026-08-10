@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"aimilivpn/internal/node"
+	"conduitvpn/internal/node"
 )
 
 type Store struct {

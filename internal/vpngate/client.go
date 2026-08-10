@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const userAgent = "Mozilla/5.0 aimilivpn/0.1"
+const userAgent = "Mozilla/5.0 conduitvpn/0.1"
 
 // Fetch downloads the VPNGate server list.
 func Fetch(ctx context.Context, url string, timeout time.Duration) ([]byte, error) {

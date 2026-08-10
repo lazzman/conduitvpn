@@ -67,7 +67,7 @@ func envInt(key string, def int) int {
 
 func Load() Config {
 	return Config{
-		DataDir:          envStr("AIMILI_DATA_DIR", "/data/aimilivpn"),
+		DataDir:          envStr("CONDUIT_DATA_DIR", "/data/conduitvpn"),
 		APIURL:           envStr("VPNGATE_API_URL", "https://www.vpngate.net/api/iphone/"),
 		FetchTimeout:     time.Duration(envInt("FETCH_TIMEOUT_SECONDS", 30)) * time.Second,
 		FetchInterval:    time.Duration(envInt("FETCH_INTERVAL_SECONDS", 1260)) * time.Second,

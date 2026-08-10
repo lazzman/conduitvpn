@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"aimilivpn/internal/logx"
+	"conduitvpn/internal/logx"
 )
 
 // Server is a dual-protocol proxy listener.

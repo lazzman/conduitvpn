@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"aimilivpn/internal/logx"
+	"conduitvpn/internal/logx"
 )
 
 type EventType int

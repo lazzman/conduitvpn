@@ -7,7 +7,7 @@ import (
 	"io"
 	"net"
 
-	"aimilivpn/internal/logx"
+	"conduitvpn/internal/logx"
 )
 
 // handleSocks5 implements SOCKS5 with optional RFC 1929 username/password

@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"aimilivpn/internal/config"
-	"aimilivpn/internal/logx"
-	"aimilivpn/internal/manager"
-	"aimilivpn/internal/node"
-	"aimilivpn/internal/state"
+	"conduitvpn/internal/config"
+	"conduitvpn/internal/logx"
+	"conduitvpn/internal/manager"
+	"conduitvpn/internal/node"
+	"conduitvpn/internal/state"
 )
 
 //go:embed static
@@ -28,7 +28,7 @@ var staticFS embed.FS
 // assetVersion busts proxy caches: bump it whenever the static assets
 // change (Cloudflare overrides our no-cache with a 4h browser TTL, so
 // the query string is the only reliable invalidation).
-const assetVersion = "5"
+const assetVersion = "6"
 
 type Server struct {
 	cfg    config.Config
