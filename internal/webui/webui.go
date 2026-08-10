@@ -28,7 +28,7 @@ var staticFS embed.FS
 // assetVersion busts proxy caches: bump it whenever the static assets
 // change (Cloudflare overrides our no-cache with a 4h browser TTL, so
 // the query string is the only reliable invalidation).
-const assetVersion = "8"
+const assetVersion = "10"
 
 type Server struct {
 	cfg    config.Config

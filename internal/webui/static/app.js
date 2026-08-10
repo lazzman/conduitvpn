@@ -96,15 +96,19 @@ function loadNodes() {
 }
 
 function populateRouteSelects() {
-  // country dropdown: distinct countries, sorted by code
-  const cc = $("route-country");
+  // country chips: distinct countries, sorted by code, multi-select
+  const cc = $("route-country-list");
   const seen = {};
   nodes.forEach((n) => { if (n.country_short) seen[n.country_short] = true; });
   const codes = Object.keys(seen).sort();
-  cc.innerHTML = '<option value="">选择国家…</option>' + codes.map((c) =>
-    `<option value="${c}">${c} · ${COUNTRY_LONG[c] || (nodes.find(n => n.country_short === c)?.country_long || c)}</option>`
-  ).join("");
-  if (routeCfg.mode === "country" && routeCfg.country) cc.value = routeCfg.country;
+  cc.innerHTML = codes.map((c) => {
+    const name = COUNTRY_LONG[c] || (nodes.find(n => n.country_short === c)?.country_long || c);
+    return `<button type="button" class="cc-chip" data-code="${c}" title="${name}">${c} · ${name}</button>`;
+  }).join("");
+  cc.querySelectorAll(".cc-chip").forEach((chip) => {
+    chip.addEventListener("click", () => chip.classList.toggle("selected"));
+  });
+  applyChipSelection();
 
   // node dropdown: hostname · latency · ping, sorted by latency
   const nn = $("route-node");
@@ -200,15 +204,24 @@ const ROUTE_LABEL = {
   fixed: "固定 IP",
 };
 
+// highlight chips matching the comma-separated routeCfg.country
+function applyChipSelection() {
+  const selected = new Set((routeCfg.country || "").split(",").map((x) => x.trim()).filter(Boolean));
+  document.querySelectorAll("#route-country-list .cc-chip").forEach((chip) => {
+    chip.classList.toggle("selected", selected.has(chip.dataset.code));
+  });
+}
+
 function renderRoute() {
   document.querySelectorAll("#route-seg .seg-btn").forEach((b) => {
     b.classList.toggle("active", b.dataset.mode === routeCfg.mode);
   });
-  $("route-country").hidden = routeCfg.mode !== "country";
+  $("route-country-list").hidden = routeCfg.mode !== "country";
   $("route-node").hidden = routeCfg.mode !== "fixed";
-  if (routeCfg.country) $("route-country").value = routeCfg.country;
+  applyChipSelection();
   if (routeCfg.node) $("route-node").value = routeCfg.node;
-  const detail = routeCfg.mode === "country" ? " · " + (COUNTRY_LONG[routeCfg.country] || routeCfg.country)
+  const detail = routeCfg.mode === "country"
+    ? " · " + (routeCfg.country ? routeCfg.country.split(",").map((c) => COUNTRY_LONG[c] || c).join(" / ") : "未选择")
     : routeCfg.mode === "fixed" ? " · " + routeCfg.node : "";
   $("route-status").textContent = (ROUTE_LABEL[routeCfg.mode] || routeCfg.mode) + detail;
 }
@@ -223,7 +236,8 @@ function loadRoute() {
 function setRoute(mode, country, node) {
   const body = {
     mode,
-    country: country !== undefined ? country : (mode === "country" ? $("route-country").value : routeCfg.country),
+    country: country !== undefined ? country
+      : (mode === "country" ? selectedCountries().join(",") : routeCfg.country),
     node: node !== undefined ? node : (mode === "fixed" ? $("route-node").value : routeCfg.node),
   };
   $("route-msg").textContent = "应用中…";
@@ -247,10 +261,15 @@ function setRoute(mode, country, node) {
     .finally(() => setTimeout(() => { $("route-msg").textContent = ""; }, 2500));
 }
 
+function selectedCountries() {
+  return Array.from(document.querySelectorAll("#route-country-list .cc-chip.selected"))
+    .map((c) => c.dataset.code);
+}
+
 document.querySelectorAll("#route-seg .seg-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("#route-seg .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
-    $("route-country").hidden = btn.dataset.mode !== "country";
+    $("route-country-list").hidden = btn.dataset.mode !== "country";
     $("route-node").hidden = btn.dataset.mode !== "fixed";
   });
 });
