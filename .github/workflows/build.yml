@@ -31,7 +31,9 @@ jobs:
 
   test-macos:
     name: test (macos)
-    runs-on: macos-latest
+    # Go 1.22 test binaries are incompatible with the macos-26 dyld used by
+    # macos-latest. Pin the supported Apple Silicon runner for this project.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
