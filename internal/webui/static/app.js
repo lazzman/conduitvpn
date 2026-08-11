@@ -356,7 +356,7 @@ function drawChart() {
   const vals = latSeries.filter((x) => x != null);
   const max = Math.max(120, ...vals, 1) * 1.15;
   const border = cssVar("--border") || "#1e1e24";
-  const accent = cssVar("--accent") || "#34d399";
+  const accent = cssVar("--accent") || "#0066ff";
   const text2 = cssVar("--text-3") || "#5c5c68";
 
   // grid + labels

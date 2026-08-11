@@ -41,6 +41,14 @@ var versionedAssets = []string{
 	"static/theme.js",
 	"static/app.js",
 	"static/login.js",
+	"static/brand-mark.png",
+	"static/favicon.ico",
+	"static/favicon-16x16.png",
+	"static/favicon-32x32.png",
+	"static/apple-touch-icon.png",
+	"static/android-chrome-192x192.png",
+	"static/android-chrome-512x512.png",
+	"static/site.webmanifest",
 }
 
 // assetVersion busts proxy caches. It is derived from the embedded assets so
@@ -204,8 +212,7 @@ func (s *Server) handleAll(w http.ResponseWriter, r *http.Request) {
 		// static assets (styles.css / app.js) carry no secrets and must
 		// load for the login page itself; API + panel data stay gated.
 		if isStaticAsset(eff) {
-			w.Header().Set("Cache-Control", "no-cache")
-			s.static.ServeHTTP(w, r2)
+			s.serveStatic(w, r2)
 			return
 		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
@@ -218,8 +225,7 @@ func (s *Server) handleAll(w http.ResponseWriter, r *http.Request) {
 	case eff == "/" || eff == "/index.html":
 		serveIndex(w, r)
 	default:
-		w.Header().Set("Cache-Control", "no-cache")
-		s.static.ServeHTTP(w, r2)
+		s.serveStatic(w, r2)
 	}
 }
 
@@ -443,6 +449,14 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 func isStaticAsset(path string) bool {
 	last := path[strings.LastIndex(path, "/")+1:]
 	return strings.Contains(last, ".")
+}
+
+func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache")
+	if strings.HasSuffix(r.URL.Path, ".webmanifest") {
+		w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
+	}
+	s.static.ServeHTTP(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

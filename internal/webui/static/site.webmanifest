@@ -1,0 +1,22 @@
+{
+  "name": "ConduitVPN Gateway",
+  "short_name": "ConduitVPN",
+  "description": "ConduitVPN VPN gateway management console",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#0066ff",
+  "icons": [
+    {
+      "src": "./android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 /* Conduit VPN Gateway — confident dark tech, with a light counterpart.
-   One accent (signal green), neutral grays, mono for data. */
+   Conduit blue is the primary action color; cyan reserves the signal glow. */
 
 :root {
   color-scheme: dark;
@@ -13,15 +13,17 @@
   --text-2: #9a9aa6;
   --text-3: #5c5c68;
 
-  --accent: #34d399;
-  --accent-dim: rgba(52, 211, 153, 0.12);
-  --accent-border: rgba(52, 211, 153, 0.28);
-  --on-accent: #052e22;
+  --accent: #0066ff;
+  --accent-strong: #0052cc;
+  --accent-glow: #00ccff;
+  --accent-dim: rgba(0, 102, 255, 0.13);
+  --accent-border: rgba(0, 153, 255, 0.36);
+  --on-accent: #ffffff;
   --warn: #fbbf24;
   --error: #f87171;
 
   --topbar-bg: rgba(9, 9, 11, 0.9);
-  --bg-glow: radial-gradient(1100px 420px at 85% -10%, rgba(52, 211, 153, 0.05), transparent 60%);
+  --bg-glow: radial-gradient(1100px 420px at 85% -10%, rgba(0, 204, 255, 0.09), transparent 60%);
 
   --radius: 10px;
   --radius-sm: 6px;
@@ -41,15 +43,17 @@
   --text-2: #52525b;
   --text-3: #86868f;
 
-  --accent: #059669;
-  --accent-dim: rgba(5, 150, 105, 0.1);
-  --accent-border: rgba(5, 150, 105, 0.32);
+  --accent: #0066ff;
+  --accent-strong: #0052cc;
+  --accent-glow: #00aee6;
+  --accent-dim: rgba(0, 102, 255, 0.09);
+  --accent-border: rgba(0, 102, 255, 0.32);
   --on-accent: #ffffff;
   --warn: #b45309;
   --error: #dc2626;
 
   --topbar-bg: rgba(246, 246, 248, 0.92);
-  --bg-glow: radial-gradient(1100px 420px at 85% -10%, rgba(5, 150, 105, 0.06), transparent 60%);
+  --bg-glow: radial-gradient(1100px 420px at 85% -10%, rgba(0, 174, 230, 0.09), transparent 60%);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -88,14 +92,13 @@ body {
 .brand-mark {
   width: 30px;
   height: 30px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--accent);
-  font-size: 12px;
-  letter-spacing: -0.5px;
+  flex: 0 0 30px;
+}
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
@@ -117,7 +120,7 @@ body {
   cursor: pointer;
   transition: transform 0.12s ease, background 0.15s ease, color 0.15s ease;
 }
-.btn:hover { background: #2ee6a4; }
+.btn:hover { background: var(--accent-strong); }
 .btn:active { transform: translateY(1px) scale(0.99); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -127,7 +130,7 @@ body {
   border-color: var(--border-strong);
 }
 .btn-ghost:hover { color: var(--text); background: var(--surface-2); }
-.btn-ghost.active { color: var(--accent); border-color: rgba(52, 211, 153, 0.4); }
+.btn-ghost.active { color: var(--accent); border-color: var(--accent-border); }
 
 .btn-icon {
   display: inline-flex;
@@ -283,7 +286,7 @@ select.input option { background: var(--surface); color: var(--text); }
   background: var(--text-3);
 }
 
-.pill-connected { color: var(--accent); border-color: rgba(52, 211, 153, 0.35); }
+.pill-connected { color: var(--accent-glow); border-color: var(--accent-border); }
 .pill-connected .dot { background: var(--accent); animation: pulse 2s ease-in-out infinite; }
 
 .pill-connecting { color: var(--warn); border-color: rgba(251, 191, 36, 0.35); }

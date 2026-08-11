@@ -15,12 +15,20 @@ import (
 
 func TestStaticAssetVersionStable(t *testing.T) {
 	fsys := fstest.MapFS{
-		"static/index.html": &fstest.MapFile{Data: []byte("index")},
-		"static/login.html": &fstest.MapFile{Data: []byte("login")},
-		"static/styles.css": &fstest.MapFile{Data: []byte("styles")},
-		"static/theme.js":   &fstest.MapFile{Data: []byte("theme script")},
-		"static/app.js":     &fstest.MapFile{Data: []byte("app")},
-		"static/login.js":   &fstest.MapFile{Data: []byte("login script")},
+		"static/index.html":                 &fstest.MapFile{Data: []byte("index")},
+		"static/login.html":                 &fstest.MapFile{Data: []byte("login")},
+		"static/styles.css":                 &fstest.MapFile{Data: []byte("styles")},
+		"static/theme.js":                   &fstest.MapFile{Data: []byte("theme script")},
+		"static/app.js":                     &fstest.MapFile{Data: []byte("app")},
+		"static/login.js":                   &fstest.MapFile{Data: []byte("login script")},
+		"static/brand-mark.png":             &fstest.MapFile{Data: []byte("brand mark")},
+		"static/favicon.ico":                &fstest.MapFile{Data: []byte("favicon")},
+		"static/favicon-16x16.png":          &fstest.MapFile{Data: []byte("favicon 16")},
+		"static/favicon-32x32.png":          &fstest.MapFile{Data: []byte("favicon 32")},
+		"static/apple-touch-icon.png":       &fstest.MapFile{Data: []byte("apple icon")},
+		"static/android-chrome-192x192.png": &fstest.MapFile{Data: []byte("android 192")},
+		"static/android-chrome-512x512.png": &fstest.MapFile{Data: []byte("android 512")},
+		"static/site.webmanifest":           &fstest.MapFile{Data: []byte("manifest")},
 	}
 
 	first := staticAssetVersion(fsys)
@@ -35,19 +43,65 @@ func TestStaticAssetVersionStable(t *testing.T) {
 
 func TestStaticAssetVersionChangesWithContent(t *testing.T) {
 	fsys := fstest.MapFS{
-		"static/index.html": &fstest.MapFile{Data: []byte("index")},
-		"static/login.html": &fstest.MapFile{Data: []byte("login")},
-		"static/styles.css": &fstest.MapFile{Data: []byte("styles")},
-		"static/theme.js":   &fstest.MapFile{Data: []byte("theme script")},
-		"static/app.js":     &fstest.MapFile{Data: []byte("app")},
-		"static/login.js":   &fstest.MapFile{Data: []byte("login script")},
+		"static/index.html":                 &fstest.MapFile{Data: []byte("index")},
+		"static/login.html":                 &fstest.MapFile{Data: []byte("login")},
+		"static/styles.css":                 &fstest.MapFile{Data: []byte("styles")},
+		"static/theme.js":                   &fstest.MapFile{Data: []byte("theme script")},
+		"static/app.js":                     &fstest.MapFile{Data: []byte("app")},
+		"static/login.js":                   &fstest.MapFile{Data: []byte("login script")},
+		"static/brand-mark.png":             &fstest.MapFile{Data: []byte("brand mark")},
+		"static/favicon.ico":                &fstest.MapFile{Data: []byte("favicon")},
+		"static/favicon-16x16.png":          &fstest.MapFile{Data: []byte("favicon 16")},
+		"static/favicon-32x32.png":          &fstest.MapFile{Data: []byte("favicon 32")},
+		"static/apple-touch-icon.png":       &fstest.MapFile{Data: []byte("apple icon")},
+		"static/android-chrome-192x192.png": &fstest.MapFile{Data: []byte("android 192")},
+		"static/android-chrome-512x512.png": &fstest.MapFile{Data: []byte("android 512")},
+		"static/site.webmanifest":           &fstest.MapFile{Data: []byte("manifest")},
 	}
 
-	before := staticAssetVersion(fsys)
-	fsys["static/theme.js"] = &fstest.MapFile{Data: []byte("theme script changed")}
-	after := staticAssetVersion(fsys)
-	if before == after {
-		t.Fatalf("asset content change did not change version: %q", before)
+	for _, name := range versionedAssets {
+		before := staticAssetVersion(fsys)
+		fsys[name] = &fstest.MapFile{Data: append(fsys[name].Data, 'x')}
+		after := staticAssetVersion(fsys)
+		if before == after {
+			t.Fatalf("changing %s did not change asset version: %q", name, before)
+		}
+	}
+}
+
+func TestEmbeddedBrandAssets(t *testing.T) {
+	for _, name := range []string{
+		"static/brand-mark.png",
+		"static/favicon.ico",
+		"static/favicon-16x16.png",
+		"static/favicon-32x32.png",
+		"static/apple-touch-icon.png",
+		"static/android-chrome-192x192.png",
+		"static/android-chrome-512x512.png",
+		"static/site.webmanifest",
+	} {
+		if _, err := staticFS.ReadFile(name); err != nil {
+			t.Errorf("read embedded asset %s: %v", name, err)
+		}
+	}
+
+	for _, name := range []string{"static/index.html", "static/login.html"} {
+		page, err := staticFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			`./brand-mark.png?v=__VER__`,
+			`./favicon.ico?v=__VER__`,
+			`./favicon-16x16.png?v=__VER__`,
+			`./favicon-32x32.png?v=__VER__`,
+			`./apple-touch-icon.png?v=__VER__`,
+			`./site.webmanifest?v=__VER__`,
+		} {
+			if !strings.Contains(string(page), want) {
+				t.Errorf("%s is missing %q", name, want)
+			}
+		}
 	}
 }
 
@@ -130,6 +184,33 @@ func TestProductionRootRemainsNotFound(t *testing.T) {
 	s.handleAll(w, r)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("production root status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestUnauthenticatedBrandAssetsLoadFromSecretPath(t *testing.T) {
+	s := testServer(t, false)
+	for _, name := range []string{
+		"brand-mark.png",
+		"favicon.ico",
+		"favicon-16x16.png",
+		"favicon-32x32.png",
+		"apple-touch-icon.png",
+		"android-chrome-192x192.png",
+		"android-chrome-512x512.png",
+		"site.webmanifest",
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/"+s.SecretPath()+"/"+name, nil)
+		w := httptest.NewRecorder()
+		s.handleAll(w, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("GET %s status = %d, want %d", name, w.Code, http.StatusOK)
+		}
+		if got := w.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Errorf("GET %s Cache-Control = %q, want no-cache", name, got)
+		}
+		if name == "site.webmanifest" && !strings.HasPrefix(w.Header().Get("Content-Type"), "application/manifest+json") {
+			t.Errorf("GET %s Content-Type = %q, want application/manifest+json", name, w.Header().Get("Content-Type"))
+		}
 	}
 }
 
