@@ -24,10 +24,27 @@ type Prober struct {
 }
 
 func NewProber(addr string, timeout time.Duration, egressCtl *egress.Controller) *Prober {
+	return newProber(addr, timeout, func(ctx context.Context, network, address string) (net.Conn, error) {
+		return egressCtl.DialContext(ctx, network, address, timeout, 30*time.Second)
+	})
+}
+
+// NewDeviceProber sends its health request only through device. It is for
+// short-lived validation tunnels and intentionally does not alter controller
+// state used by the serving tunnel.
+func NewDeviceProber(addr string, timeout time.Duration, device string) (*Prober, func(), error) {
+	dial, cleanup, err := egress.NewDeviceDialer(device)
+	if err != nil {
+		return nil, nil, err
+	}
+	return newProber(addr, timeout, func(ctx context.Context, network, address string) (net.Conn, error) {
+		return dial(ctx, network, address, timeout, 30*time.Second)
+	}), cleanup, nil
+}
+
+func newProber(addr string, timeout time.Duration, dial func(context.Context, string, string) (net.Conn, error)) *Prober {
 	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return egressCtl.DialContext(ctx, network, address, timeout, 30*time.Second)
-		},
+		DialContext:     dial,
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	return &Prober{

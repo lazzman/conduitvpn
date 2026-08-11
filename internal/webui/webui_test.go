@@ -264,6 +264,47 @@ func TestSecurityHeadersAreSet(t *testing.T) {
 	}
 }
 
+func TestBlacklistActionAPIs(t *testing.T) {
+	s := testServer(t, false)
+
+	get := httptest.NewRecorder()
+	s.apiTestBlacklist(get, httptest.NewRequest(http.MethodGet, "/api/actions/test-blacklist", nil))
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"running"`) {
+		t.Fatalf("GET test-blacklist = %d %s", get.Code, get.Body.String())
+	}
+
+	post := httptest.NewRecorder()
+	s.apiTestBlacklist(post, httptest.NewRequest(http.MethodPost, "/api/actions/test-blacklist", nil))
+	if post.Code != http.StatusAccepted {
+		t.Fatalf("POST test-blacklist = %d %s", post.Code, post.Body.String())
+	}
+
+	badMethod := httptest.NewRecorder()
+	s.apiTestBlacklist(badMethod, httptest.NewRequest(http.MethodPut, "/api/actions/test-blacklist", nil))
+	if badMethod.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("PUT test-blacklist = %d", badMethod.Code)
+	}
+
+	restoreServer := testServer(t, false)
+	restore := httptest.NewRecorder()
+	restoreServer.apiRestoreAvailableBlacklist(restore, httptest.NewRequest(http.MethodPost, "/api/actions/restore-available-blacklist", nil))
+	if restore.Code != http.StatusOK || !strings.Contains(restore.Body.String(), `"restored":0`) {
+		t.Fatalf("POST restore blacklist = %d %s", restore.Code, restore.Body.String())
+	}
+}
+
+func TestEmbeddedBlacklistManagerUI(t *testing.T) {
+	page, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selector := range []string{"btn-blacklist", "blacklist-dialog", "btn-blacklist-test", "btn-blacklist-restore"} {
+		if !strings.Contains(string(page), selector) {
+			t.Fatalf("index.html missing %q", selector)
+		}
+	}
+}
+
 func testServer(t *testing.T, demo bool) *Server {
 	t.Helper()
 	dir := t.TempDir()

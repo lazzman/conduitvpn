@@ -56,6 +56,126 @@ function renderState(snap) {
   $("c-blacklist").textContent = `${snap.blacklist_count || 0} 个节点已拉黑`;
 }
 
+/* ---- blacklist manager ---- */
+let blacklistEntries = {};
+let blacklistTest = { running: false, total: 0, completed: 0, results: [] };
+let blacklistPollTimer = null;
+
+const BLACKLIST_TEST_LABEL = {
+  pending: "等待测试",
+  running: "验证中…",
+  passed: "可用",
+  failed: "不可用",
+  skipped: "无法验证",
+};
+
+function formatBlacklistTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : logTimeFormatter.format(date);
+}
+
+function renderBlacklistManager() {
+  const tbody = document.querySelector("#blacklist-table tbody");
+  const entries = Object.entries(blacklistEntries).sort(([a], [b]) => a.localeCompare(b));
+  const resultByHost = new Map((blacklistTest.results || []).map((r) => [r.host, r]));
+  const nodeByHost = new Map(nodes.map((n) => [n.host_name, n]));
+  const completed = blacklistTest.completed || 0;
+  const total = blacklistTest.total || entries.length;
+  $("blacklist-progress").textContent = blacklistTest.running
+    ? `验证中 ${completed} / ${total}`
+    : (blacklistTest.started_at ? `已完成 ${completed} / ${total}` : (total ? "尚未测试" : "暂无拉黑节点"));
+
+  $("btn-blacklist-test").disabled = blacklistTest.running || entries.length === 0;
+  $("btn-blacklist-test").textContent = blacklistTest.running ? "测试中…" : "批量测试";
+  const passed = entries.filter(([host]) => resultByHost.get(host)?.status === "passed").length;
+  $("btn-blacklist-restore").disabled = blacklistTest.running || passed === 0;
+
+  tbody.replaceChildren();
+  if (entries.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "empty-note";
+    td.textContent = "暂无拉黑节点";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  const cell = (className, value, title = "") => {
+    const td = document.createElement("td");
+    td.className = className;
+    td.textContent = value;
+    if (title) td.title = title;
+    return td;
+  };
+  for (const [host, entry] of entries) {
+    const tr = document.createElement("tr");
+    const n = nodeByHost.get(host);
+    const nodeText = n
+      ? `${countryRegionName(n.country_short, n.country_long) || "—"} · ${n.ip || "—"}`
+      : "当前节点池未找到";
+    const result = resultByHost.get(host) || { status: "pending" };
+    const label = BLACKLIST_TEST_LABEL[result.status] || "未测试";
+    const detail = result.error ? `${label} · ${result.error}` : label;
+    tr.appendChild(cell("host-cell", host, host));
+    tr.appendChild(cell("ip-cell", nodeText, nodeText));
+    tr.appendChild(cell("", entry.reason || "—", entry.reason || ""));
+    tr.appendChild(cell("mono", formatBlacklistTime(entry.marked_at)));
+    tr.appendChild(cell(`blacklist-result ${result.status}`, detail, detail));
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadBlacklistManager() {
+  try {
+    const [entriesResponse, testResponse] = await Promise.all([
+      fetch("./api/blacklist"),
+      fetch("./api/actions/test-blacklist"),
+    ]);
+    if (!entriesResponse.ok || !testResponse.ok) return;
+    blacklistEntries = await entriesResponse.json();
+    blacklistTest = await testResponse.json();
+    renderBlacklistManager();
+    clearTimeout(blacklistPollTimer);
+    if ($("blacklist-dialog").open && blacklistTest.running) {
+      blacklistPollTimer = setTimeout(loadBlacklistManager, 900);
+    }
+  } catch (_) {}
+}
+
+$("btn-blacklist").addEventListener("click", () => {
+  const dialog = $("blacklist-dialog");
+  dialog.showModal();
+  loadBlacklistManager();
+});
+
+$("btn-blacklist-close").addEventListener("click", () => $("blacklist-dialog").close());
+$("blacklist-dialog").addEventListener("close", () => {
+  clearTimeout(blacklistPollTimer);
+  blacklistPollTimer = null;
+});
+
+$("btn-blacklist-test").addEventListener("click", async () => {
+  try {
+    const response = await fetch("./api/actions/test-blacklist", { method: "POST" });
+    if (!response.ok) return;
+    await loadBlacklistManager();
+  } catch (_) {}
+});
+
+$("btn-blacklist-restore").addEventListener("click", async () => {
+  try {
+    const response = await fetch("./api/actions/restore-available-blacklist", { method: "POST" });
+    if (!response.ok) return;
+    await Promise.all([
+      loadBlacklistManager(),
+      loadNodes(),
+      fetch("./api/state").then((r) => r.ok ? r.json() : null).then((snap) => { if (snap) renderState(snap); }),
+    ]);
+  } catch (_) {}
+});
+
 /* ---- node table ---- */
 let nodes = [];
 let sortKey = "latency";

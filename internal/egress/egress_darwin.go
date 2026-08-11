@@ -33,3 +33,7 @@ func bindSocket(device string, raw syscall.RawConn) error {
 	}
 	return nil
 }
+
+func bindDeviceSocket(device string, raw syscall.RawConn) error { return bindSocket(device, raw) }
+
+func setupDeviceRoute(_ string) (func(), error) { return func() {}, nil }

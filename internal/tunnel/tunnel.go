@@ -6,6 +6,7 @@ package tunnel
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -118,29 +119,7 @@ func (t *Tunnel) Start(opts Options) error {
 	t.killed = false
 	t.mu.Unlock()
 
-	dev := opts.Dev
-	if dev == "" {
-		dev = "tun"
-	}
-	verb := opts.Verb
-	if verb == 0 {
-		verb = 3
-	}
-
-	args := []string{
-		"--config", opts.ConfigFile,
-		"--dev", dev,
-		"--dev-type", "tun",
-		"--verb", fmt.Sprint(verb),
-	}
-	if opts.AuthFile != "" {
-		args = append(args, "--auth-user-pass", opts.AuthFile)
-	}
-	if opts.RouteNoPull {
-		args = append(args, "--route-nopull")
-	}
-
-	cmd := exec.Command("openvpn", args...)
+	cmd := exec.Command("openvpn", openVPNArgs(opts)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -164,13 +143,45 @@ func (t *Tunnel) Start(opts Options) error {
 	return nil
 }
 
+func openVPNArgs(opts Options) []string {
+	dev := opts.Dev
+	if dev == "" {
+		dev = "tun"
+	}
+	verb := opts.Verb
+	if verb == 0 {
+		verb = 3
+	}
+	args := []string{
+		"--config", opts.ConfigFile,
+		"--dev", dev,
+		"--dev-type", "tun",
+		"--verb", fmt.Sprint(verb),
+	}
+	if opts.AuthFile != "" {
+		args = append(args, "--auth-user-pass", opts.AuthFile)
+	}
+	if opts.RouteNoPull {
+		args = append(args, "--route-nopull")
+	}
+	return args
+}
+
 // WaitHandshake blocks until the tunnel reports "Initialization Sequence
 // Completed", or fails fast on auth/TUN/fatal errors, or times out.
 func (t *Tunnel) WaitHandshake(timeout time.Duration) error {
+	return t.WaitHandshakeContext(context.Background(), timeout)
+}
+
+// WaitHandshakeContext is WaitHandshake with cancellation support for
+// short-lived tunnel users that must stop promptly during shutdown.
+func (t *Tunnel) WaitHandshakeContext(ctx context.Context, timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-t.handshakeCh:
 			return nil
 		case ev := <-t.events:

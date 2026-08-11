@@ -9,9 +9,12 @@ import (
 )
 
 const (
-	routeMark     = "0xc0de"
-	routeTable    = "51820"
-	routePriority = "10001"
+	routeMark          = "0xc0de"
+	routeTable         = "51820"
+	routePriority      = "10001"
+	probeRouteMark     = "0xc0df"
+	probeRouteTable    = "51821"
+	probeRoutePriority = "10002"
 )
 
 func setupHostRoute(device string) error {
@@ -54,11 +57,17 @@ func runIP(args ...string) error {
 }
 
 func bindSocket(_ string, raw syscall.RawConn) error {
+	return markSocket(raw, 0xc0de)
+}
+
+func bindDeviceSocket(_ string, raw syscall.RawConn) error {
+	return markSocket(raw, 0xc0df)
+}
+
+func markSocket(raw syscall.RawConn, mark int) error {
 	var setErr error
 	err := raw.Control(func(fd uintptr) {
-		// SO_MARK is evaluated by the policy rule above; only dials issued
-		// through Controller receive it, so host traffic is unaffected.
-		setErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, 0xc0de)
+		setErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, mark)
 	})
 	if err != nil {
 		return err
@@ -67,4 +76,29 @@ func bindSocket(_ string, raw syscall.RawConn) error {
 		return fmt.Errorf("mark tunnel socket: %w", setErr)
 	}
 	return nil
+}
+
+func setupDeviceRoute(device string) (func(), error) {
+	clearDeviceRoute()
+	commands := [][]string{
+		{"route", "replace", "default", "dev", device, "table", probeRouteTable},
+		{"rule", "add", "fwmark", probeRouteMark, "table", probeRouteTable, "priority", probeRoutePriority},
+	}
+	if err := runIP(commands[0]...); err != nil {
+		return nil, fmt.Errorf("install verification route: %w", err)
+	}
+	if err := runIP(commands[1]...); err != nil {
+		clearDeviceRoute()
+		return nil, fmt.Errorf("install verification policy rule: %w", err)
+	}
+	return clearDeviceRoute, nil
+}
+
+func clearDeviceRoute() {
+	for _, args := range [][]string{
+		{"rule", "del", "fwmark", probeRouteMark, "table", probeRouteTable, "priority", probeRoutePriority},
+		{"route", "flush", "table", probeRouteTable},
+	} {
+		_ = runIP(args...)
+	}
 }

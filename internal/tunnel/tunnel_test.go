@@ -1,6 +1,8 @@
 package tunnel
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -50,6 +52,23 @@ func TestWaitHandshakeTimeout(t *testing.T) {
 	}
 	if time.Since(start) < 150*time.Millisecond {
 		t.Fatal("returned too early")
+	}
+}
+
+func TestWaitHandshakeContextCancellation(t *testing.T) {
+	tun := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := tun.WaitHandshakeContext(ctx, time.Second); err == nil {
+		t.Fatal("cancelled context should stop handshake wait")
+	}
+}
+
+func TestOpenVPNArgsRouteNoPull(t *testing.T) {
+	args := openVPNArgs(Options{ConfigFile: "node.ovpn", AuthFile: "auth", RouteNoPull: true})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--dev tun") || !strings.Contains(joined, "--route-nopull") {
+		t.Fatalf("args = %v", args)
 	}
 }
 

@@ -69,7 +69,12 @@
     <div class="card">
       <div class="card-label">运行时长</div>
       <div id="c-uptime" class="card-value mono">—</div>
-      <div id="c-blacklist" class="card-sub">—</div>
+      <div class="card-sub card-sub-action">
+        <span id="c-blacklist">—</span>
+        <button id="btn-blacklist" class="btn btn-ghost btn-icon btn-card-icon" type="button" title="管理黑名单" aria-label="管理黑名单">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        </button>
+      </div>
     </div>
   </section>
 
@@ -146,6 +151,36 @@
     <pre id="log-view" class="log-view mono"></pre>
   </section>
 </main>
+
+<dialog id="blacklist-dialog" class="dialog" aria-labelledby="blacklist-title">
+  <div class="dialog-head">
+    <div>
+      <h2 id="blacklist-title">黑名单管理</h2>
+      <p id="blacklist-progress" class="card-sub mono">—</p>
+    </div>
+    <button id="btn-blacklist-close" class="btn btn-ghost btn-icon" type="button" title="关闭" aria-label="关闭黑名单管理">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="dialog-actions">
+    <button id="btn-blacklist-test" class="btn" type="button">批量测试</button>
+    <button id="btn-blacklist-restore" class="btn btn-ghost" type="button" disabled>恢复可用节点</button>
+  </div>
+  <div class="table-wrap blacklist-table-wrap">
+    <table id="blacklist-table">
+      <thead>
+        <tr>
+          <th>主机</th>
+          <th>节点</th>
+          <th>拉黑原因</th>
+          <th>拉黑时间</th>
+          <th>验证结果</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</dialog>
 
 <footer class="site-footer">
   <a href="https://github.com/sarices/conduitvpn" target="_blank" rel="noreferrer">GitHub</a>

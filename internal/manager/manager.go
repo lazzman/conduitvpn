@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,11 +44,14 @@ type Manager struct {
 	egress *egress.Controller
 	tun    *tunnel.Tunnel
 
-	state       State
-	stateDetail string
-	current     *node.Node
-	blacklist   map[string]state.BlacklistEntry
-	mu          sync.Mutex
+	state             State
+	stateDetail       string
+	current           *node.Node
+	blacklist         map[string]state.BlacklistEntry
+	blacklistTest     BlacklistTestStatus
+	blacklistVerifier func(context.Context, *node.Node) error
+	taskCtx           context.Context
+	mu                sync.Mutex
 
 	// Route mode (auto / country / fixed)
 	routeMode    string
@@ -84,6 +88,35 @@ type Snapshot struct {
 	RouteNode      string     `json:"route_node,omitempty"`
 }
 
+const (
+	BlacklistTestPending = "pending"
+	BlacklistTestRunning = "running"
+	BlacklistTestPassed  = "passed"
+	BlacklistTestFailed  = "failed"
+	BlacklistTestSkipped = "skipped"
+)
+
+var ErrBlacklistTestRunning = errors.New("blacklist verification is already running")
+
+// BlacklistTestResult is the ephemeral result of one isolated VPN check.
+// Results are intentionally not persisted: a restart requires a fresh check.
+type BlacklistTestResult struct {
+	Host     string `json:"host"`
+	Status   string `json:"status"`
+	Error    string `json:"error,omitempty"`
+	TestedAt string `json:"tested_at,omitempty"`
+}
+
+// BlacklistTestStatus represents the current or most recent batch job.
+type BlacklistTestStatus struct {
+	Running    bool                  `json:"running"`
+	StartedAt  string                `json:"started_at,omitempty"`
+	FinishedAt string                `json:"finished_at,omitempty"`
+	Total      int                   `json:"total"`
+	Completed  int                   `json:"completed"`
+	Results    []BlacklistTestResult `json:"results"`
+}
+
 func New(cfg config.Config) *Manager {
 	egressCtl := egress.New(cfg.NetworkMode)
 	m := &Manager{
@@ -93,6 +126,7 @@ func New(cfg config.Config) *Manager {
 		egress:       egressCtl,
 		state:        StateIdle,
 		blacklist:    map[string]state.BlacklistEntry{},
+		taskCtx:      context.Background(),
 		startedAt:    time.Now(),
 		refreshCh:    make(chan struct{}, 1),
 		modeCh:       make(chan struct{}, 1),
@@ -100,11 +134,13 @@ func New(cfg config.Config) *Manager {
 		routeCountry: cfg.RouteCountry,
 		routeNode:    cfg.RouteNode,
 	}
+	m.blacklistVerifier = m.verifyBlacklistedNode
 	// Persisted route config (set via the web UI) wins over env defaults.
 	if r, err := m.store.LoadRoute(); err == nil && r.Mode != "" {
 		m.routeMode, m.routeCountry, m.routeNode = r.Mode, r.Country, r.Node
 		logx.Info("route config loaded", "mode", r.Mode, "country", r.Country, "node", r.Node)
 	}
+	m.loadBlacklist()
 	return m
 }
 
@@ -189,6 +225,9 @@ func demoNodes(refresh uint32) []*node.Node {
 
 // Run is the supervisor loop. It blocks until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) error {
+	m.mu.Lock()
+	m.taskCtx = ctx
+	m.mu.Unlock()
 	// Resolve the effective upstream: sing-box sources take precedence
 	// over the legacy OPENVPN_UPSTREAM_*/BO_* envs.
 	proxy, rt, err := upstream.Start(ctx, &m.cfg, m.cfg.DataDir)
@@ -203,7 +242,6 @@ func (m *Manager) Run(ctx context.Context) error {
 	if m.fetchUpstream != nil {
 		logx.Info("using upstream proxy for node fetch", "type", m.fetchUpstream.Type, "addr", m.fetchUpstream.Addr)
 	}
-	m.loadBlacklist()
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -468,22 +506,256 @@ func (m *Manager) prepareFiles(n *node.Node) (string, string, error) {
 	return cfgPath, authPath, nil
 }
 
+// StartBlacklistTest launches one serial validation job. The job uses a
+// snapshot so nodes newly blacklisted while it runs are not restored by a
+// result they did not participate in.
+func (m *Manager) StartBlacklistTest() error {
+	nodes, err := m.store.LoadNodes()
+	if err != nil {
+		nodes = nil
+	}
+	byHost := make(map[string]*node.Node, len(nodes))
+	for _, n := range nodes {
+		if n == nil || n.HostName == "" {
+			continue
+		}
+		nodeCopy := *n
+		byHost[n.HostName] = &nodeCopy
+	}
+
+	m.mu.Lock()
+	if m.blacklistTest.Running {
+		m.mu.Unlock()
+		return ErrBlacklistTestRunning
+	}
+	hosts := make([]string, 0, len(m.blacklist))
+	for host := range m.blacklist {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	results := make([]BlacklistTestResult, 0, len(hosts))
+	for _, host := range hosts {
+		results = append(results, BlacklistTestResult{Host: host, Status: BlacklistTestPending})
+	}
+	m.blacklistTest = BlacklistTestStatus{
+		Running:   true,
+		StartedAt: time.Now().Format(time.RFC3339),
+		Total:     len(hosts),
+		Results:   results,
+	}
+	taskCtx := m.taskCtx
+	m.mu.Unlock()
+
+	logx.Info("blacklist verification started", "count", len(hosts))
+	go m.runBlacklistTest(taskCtx, hosts, byHost)
+	return nil
+}
+
+func (m *Manager) runBlacklistTest(ctx context.Context, hosts []string, byHost map[string]*node.Node) {
+	for index, host := range hosts {
+		result := BlacklistTestResult{Host: host, Status: BlacklistTestRunning}
+		m.setBlacklistTestResult(index, result, false)
+
+		n, ok := byHost[host]
+		if !ok {
+			result.Status = BlacklistTestSkipped
+			result.Error = "当前节点池未找到，无法验证"
+		} else if err := m.blacklistVerifier(ctx, n); err != nil {
+			result.Status = BlacklistTestFailed
+			result.Error = err.Error()
+			logx.Warn("blacklist verification failed", "host", host, "err", err)
+		} else {
+			result.Status = BlacklistTestPassed
+			logx.Info("blacklist verification passed", "host", host)
+		}
+		result.TestedAt = time.Now().Format(time.RFC3339)
+		m.setBlacklistTestResult(index, result, true)
+	}
+
+	m.mu.Lock()
+	m.blacklistTest.Running = false
+	m.blacklistTest.FinishedAt = time.Now().Format(time.RFC3339)
+	completed := m.blacklistTest.Completed
+	total := m.blacklistTest.Total
+	m.mu.Unlock()
+	logx.Info("blacklist verification finished", "completed", completed, "total", total)
+}
+
+func (m *Manager) setBlacklistTestResult(index int, result BlacklistTestResult, completed bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if index >= len(m.blacklistTest.Results) {
+		return
+	}
+	m.blacklistTest.Results[index] = result
+	if completed {
+		m.blacklistTest.Completed++
+	}
+}
+
+// BlacklistTestStatus returns a copy suitable for API serialization.
+func (m *Manager) BlacklistTestStatus() BlacklistTestStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	status := m.blacklistTest
+	status.Results = append([]BlacklistTestResult(nil), m.blacklistTest.Results...)
+	return status
+}
+
+// RestoreAvailableBlacklist removes only nodes that passed the most recent
+// completed validation job. The map update and persistence share one lock so
+// a concurrent automatic blacklist update cannot be lost.
+func (m *Manager) RestoreAvailableBlacklist() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.blacklistTest.Running {
+		return 0, ErrBlacklistTestRunning
+	}
+	updated := make(map[string]state.BlacklistEntry, len(m.blacklist))
+	for host, entry := range m.blacklist {
+		updated[host] = entry
+	}
+	restored := 0
+	for _, result := range m.blacklistTest.Results {
+		if result.Status != BlacklistTestPassed {
+			continue
+		}
+		if _, ok := updated[result.Host]; ok {
+			delete(updated, result.Host)
+			restored++
+		}
+	}
+	if restored == 0 {
+		return 0, nil
+	}
+	if err := m.store.SaveBlacklist(updated); err != nil {
+		return 0, err
+	}
+	m.blacklist = updated
+	logx.Info("blacklist nodes restored", "count", restored)
+	return restored, nil
+}
+
+func (m *Manager) verifyBlacklistedNode(ctx context.Context, n *node.Node) error {
+	cfgPath, authPath, cleanup, err := m.prepareProbeFiles(n)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	tun := tunnel.New()
+	if err := tun.Start(tunnel.Options{
+		ConfigFile:  cfgPath,
+		AuthFile:    authPath,
+		RouteNoPull: true,
+	}); err != nil {
+		return err
+	}
+	defer tun.Stop()
+	if err := tun.WaitHandshakeContext(ctx, m.cfg.ConnectTimeout); err != nil {
+		return err
+	}
+	if !sleepCtx(ctx, m.cfg.ProbeSettle) {
+		return ctx.Err()
+	}
+	device := tun.Device()
+	if device == "" {
+		return errors.New("OpenVPN did not report a tunnel device")
+	}
+
+	prober, cleanupRoute, err := health.NewDeviceProber(m.cfg.HealthAddr, m.cfg.ProbeTimeout, device)
+	if err != nil {
+		return err
+	}
+	defer cleanupRoute()
+	tries := m.cfg.InitialProbeTries
+	if tries < 1 {
+		tries = 1
+	}
+	var lastErr error
+	for i := 0; i < tries; i++ {
+		if err := prober.Check(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if i+1 < tries && !sleepCtx(ctx, m.cfg.ProbeInterval) {
+			return ctx.Err()
+		}
+	}
+	return fmt.Errorf("tunnel health check failed: %w", lastErr)
+}
+
+func (m *Manager) prepareProbeFiles(n *node.Node) (cfgPath, authPath string, cleanup func(), err error) {
+	safeConfig, err := vpngate.ValidateOpenVPNProfile(n.ConfigText, n.IP)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("unsafe OpenVPN profile: %w", err)
+	}
+	if err := os.MkdirAll(m.cfg.DataDir, 0o700); err != nil {
+		return "", "", nil, err
+	}
+	cfgFile, err := os.CreateTemp(m.cfg.DataDir, "blacklist-probe-*.ovpn")
+	if err != nil {
+		return "", "", nil, err
+	}
+	cfgPath = cfgFile.Name()
+	if err = cfgFile.Chmod(0o600); err == nil {
+		_, err = cfgFile.WriteString(safeConfig)
+	}
+	if closeErr := cfgFile.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(cfgPath)
+		return "", "", nil, err
+	}
+
+	authFile, err := os.CreateTemp(m.cfg.DataDir, "blacklist-probe-*.auth")
+	if err != nil {
+		_ = os.Remove(cfgPath)
+		return "", "", nil, err
+	}
+	authPath = authFile.Name()
+	auth := fmt.Sprintf("%s\n%s\n", m.cfg.OpenVPNAuthUser, m.cfg.OpenVPNAuthPass)
+	if err = authFile.Chmod(0o600); err == nil {
+		_, err = authFile.WriteString(auth)
+	}
+	if closeErr := authFile.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(cfgPath)
+		_ = os.Remove(authPath)
+		return "", "", nil, err
+	}
+	return cfgPath, authPath, func() {
+		_ = os.Remove(cfgPath)
+		_ = os.Remove(authPath)
+	}, nil
+}
+
 func (m *Manager) loadBlacklist() {
 	bl, err := m.store.LoadBlacklist()
 	if err != nil {
 		logx.Debug("no blacklist yet", "err", err)
 		return
 	}
+	m.mu.Lock()
 	m.blacklist = bl
+	m.mu.Unlock()
 	logx.Info("blacklist loaded", "count", len(bl))
 }
 
 func (m *Manager) isBlacklisted(n *node.Node) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	_, ok := m.blacklist[n.HostName]
 	return ok
 }
 
 func (m *Manager) markBlacklisted(n *node.Node, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.blacklist[n.HostName] = state.BlacklistEntry{
 		Reason:   reason,
 		MarkedAt: time.Now().Format(time.RFC3339),

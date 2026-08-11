@@ -25,3 +25,10 @@ func TestContainerModeIsReady(t *testing.T) {
 		t.Fatal("container egress should rely on its namespace route immediately")
 	}
 }
+
+func TestNewDeviceDialerRequiresDevice(t *testing.T) {
+	_, _, err := NewDeviceDialer("")
+	if err == nil {
+		t.Fatal("missing device should be rejected")
+	}
+}

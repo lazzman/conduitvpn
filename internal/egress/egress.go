@@ -106,6 +106,31 @@ func (c *Controller) DialContext(ctx context.Context, network, address string, t
 	return d.DialContext(ctx, c.network(network), address)
 }
 
+// NewDeviceDialer returns a dial function constrained to one temporary tunnel
+// plus its cleanup function. It never changes the serving controller. Linux
+// uses an isolated mark and policy table so deployments only need NET_ADMIN;
+// macOS binds directly to the interface.
+func NewDeviceDialer(device string) (func(context.Context, string, string, time.Duration, time.Duration) (net.Conn, error), func(), error) {
+	if device == "" {
+		return nil, nil, errors.New("tunnel device is required")
+	}
+	cleanup, err := setupDeviceRoute(device)
+	if err != nil {
+		return nil, nil, err
+	}
+	dial := func(ctx context.Context, network, address string, timeout, keepAlive time.Duration) (net.Conn, error) {
+		d := net.Dialer{
+			Timeout:   timeout,
+			KeepAlive: keepAlive,
+			Control: func(_, _ string, raw syscall.RawConn) error {
+				return bindDeviceSocket(device, raw)
+			},
+		}
+		return d.DialContext(ctx, network, address)
+	}
+	return dial, cleanup, nil
+}
+
 // Resolver returns a DNS resolver whose UDP requests follow the same egress
 // policy as proxied TCP traffic.
 func (c *Controller) Resolver(server string) *net.Resolver {

@@ -310,6 +310,8 @@ curl -X PUT -d '{"mode":"auto"}' http://127.0.0.1:8787/<secret>/api/route
 | `/api/blacklist` | GET | 黑名单 |
 | `/api/logs` / `/api/logs/stream` | GET / SSE | 最近日志 / 实时流 |
 | `/api/actions/update-nodes` | POST | 立即重新拉取测速 |
+| `/api/actions/test-blacklist` | GET/POST | 查询或启动黑名单节点的串行隔离 VPN 验证 |
+| `/api/actions/restore-available-blacklist` | POST | 恢复最近一轮验证通过的黑名单节点 |
 | `/healthz` | GET | 健康检查（无鉴权） |
 
 > 响应中的节点数据已脱敏，不含 OpenVPN 配置内容（证书/私钥不泄露）。

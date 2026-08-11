@@ -13,6 +13,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -132,6 +133,8 @@ func (s *Server) registerAPI() {
 	s.api.HandleFunc("/api/logs", s.apiLogs)
 	s.api.HandleFunc("/api/logs/stream", s.apiLogStream)
 	s.api.HandleFunc("/api/actions/update-nodes", s.apiUpdateNodes)
+	s.api.HandleFunc("/api/actions/test-blacklist", s.apiTestBlacklist)
+	s.api.HandleFunc("/api/actions/restore-available-blacklist", s.apiRestoreAvailableBlacklist)
 }
 
 func (s *Server) Start() error {
@@ -591,6 +594,42 @@ func (s *Server) apiUpdateNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mgr.TriggerFetch()
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+func (s *Server) apiTestBlacklist(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.mgr.BlacklistTestStatus())
+	case http.MethodPost:
+		if err := s.mgr.StartBlacklistTest(); err != nil {
+			if errors.Is(err, manager.ErrBlacklistTestRunning) {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "黑名单验证正在进行"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET or POST"})
+	}
+}
+
+func (s *Server) apiRestoreAvailableBlacklist(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		return
+	}
+	restored, err := s.mgr.RestoreAvailableBlacklist()
+	if err != nil {
+		if errors.Is(err, manager.ErrBlacklistTestRunning) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "黑名单验证正在进行"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restored": restored})
 }
 
 // sanitizeNode strips the embedded OpenVPN config (certs + private keys)

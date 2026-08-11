@@ -1,11 +1,16 @@
 package manager
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"conduitvpn/internal/config"
 	"conduitvpn/internal/node"
+	"conduitvpn/internal/state"
 )
 
 func testManager(t *testing.T, mode, country, node string) *Manager {
@@ -160,5 +165,118 @@ func TestPrepareFilesRevalidatesCachedProfile(t *testing.T) {
 	}
 	if _, _, err := m.prepareFiles(n); err == nil {
 		t.Fatal("unsafe cached profile should not be written")
+	}
+}
+
+func setupBlacklistTestManager(t *testing.T, hosts ...string) *Manager {
+	t.Helper()
+	m := testManager(t, "auto", "", "")
+	if err := m.store.SaveNodes(fakeNodes()); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	for _, host := range hosts {
+		m.blacklist[host] = state.BlacklistEntry{Reason: "test", MarkedAt: "2026-01-01T00:00:00Z"}
+	}
+	m.mu.Unlock()
+	if err := m.store.SaveBlacklist(m.blacklist); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func waitBlacklistTest(t *testing.T, m *Manager) BlacklistTestStatus {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		status := m.BlacklistTestStatus()
+		if !status.Running {
+			return status
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("blacklist test did not finish")
+	return BlacklistTestStatus{}
+}
+
+func TestBlacklistTestSerialAndMissingNode(t *testing.T) {
+	m := setupBlacklistTestManager(t, "vpn-jp-1", "vpn-kr-1", "gone-node")
+	var mu sync.Mutex
+	var verified []string
+	m.blacklistVerifier = func(_ context.Context, n *node.Node) error {
+		mu.Lock()
+		verified = append(verified, n.HostName)
+		mu.Unlock()
+		if n.HostName == "vpn-kr-1" {
+			return errors.New("handshake timeout")
+		}
+		return nil
+	}
+	if err := m.StartBlacklistTest(); err != nil {
+		t.Fatal(err)
+	}
+	status := waitBlacklistTest(t, m)
+	if status.Total != 3 || status.Completed != 3 || len(status.Results) != 3 {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+	if got := status.Results[0]; got.Host != "gone-node" || got.Status != BlacklistTestSkipped {
+		t.Fatalf("missing-node result = %+v", got)
+	}
+	if got := status.Results[1]; got.Host != "vpn-jp-1" || got.Status != BlacklistTestPassed {
+		t.Fatalf("successful result = %+v", got)
+	}
+	if got := status.Results[2]; got.Host != "vpn-kr-1" || got.Status != BlacklistTestFailed {
+		t.Fatalf("failed result = %+v", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(verified) != 2 || verified[0] != "vpn-jp-1" || verified[1] != "vpn-kr-1" {
+		t.Fatalf("verification order = %v", verified)
+	}
+}
+
+func TestBlacklistTestRejectsConcurrentRun(t *testing.T) {
+	m := setupBlacklistTestManager(t, "vpn-jp-1")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	m.blacklistVerifier = func(_ context.Context, _ *node.Node) error {
+		close(started)
+		<-release
+		return nil
+	}
+	if err := m.StartBlacklistTest(); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := m.StartBlacklistTest(); !errors.Is(err, ErrBlacklistTestRunning) {
+		t.Fatalf("concurrent start error = %v", err)
+	}
+	close(release)
+	_ = waitBlacklistTest(t, m)
+}
+
+func TestRestoreAvailableBlacklistOnlyRestoresPassed(t *testing.T) {
+	m := setupBlacklistTestManager(t, "vpn-jp-1", "vpn-kr-1")
+	m.mu.Lock()
+	m.blacklistTest = BlacklistTestStatus{Results: []BlacklistTestResult{
+		{Host: "vpn-jp-1", Status: BlacklistTestPassed},
+		{Host: "vpn-kr-1", Status: BlacklistTestFailed},
+		{Host: "gone-node", Status: BlacklistTestPassed},
+	}}
+	m.mu.Unlock()
+	restored, err := m.RestoreAvailableBlacklist()
+	if err != nil || restored != 1 {
+		t.Fatalf("restore = %d, %v", restored, err)
+	}
+	m.mu.Lock()
+	_, jp := m.blacklist["vpn-jp-1"]
+	_, kr := m.blacklist["vpn-kr-1"]
+	m.mu.Unlock()
+	if jp || !kr {
+		t.Fatalf("blacklist after restore: jp=%t kr=%t", jp, kr)
+	}
+	persisted, err := m.store.LoadBlacklist()
+	if err != nil || len(persisted) != 1 || persisted["vpn-kr-1"].Reason != "test" {
+		t.Fatalf("persisted blacklist = %+v, err = %v", persisted, err)
 	}
 }
