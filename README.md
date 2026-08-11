@@ -10,7 +10,7 @@
 
 ## 📸 界面预览
 
-![ConduitVPN 浅色主题管理后台](docs/screenshots/light.png)
+![ConduitVPN Demo 管理后台（浅色主题）](docs/screenshots/light.png)
 
 - 顶部状态卡片：当前节点 / 隧道出口 / 代理端口 / 运行时长
 - 路由模式：智能自动 / 固定国家地区（多选）/ 固定 IP（一键锁定）
