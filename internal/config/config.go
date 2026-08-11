@@ -168,9 +168,6 @@ func (c Config) Validate() error {
 	if (c.UITLSCert == "") != (c.UITLSKey == "") {
 		return fmt.Errorf("UI_TLS_CERT and UI_TLS_KEY must be configured together")
 	}
-	if !isLoopbackBind(c.UIHost) && (c.UITLSCert == "" || c.UITLSKey == "") {
-		return fmt.Errorf("non-loopback UI_HOST requires UI_TLS_CERT and UI_TLS_KEY")
-	}
 	if !isLoopbackBind(c.LocalProxyHost) {
 		if c.ProxyUser == "" || c.ProxyPass == "" {
 			return fmt.Errorf("non-loopback LOCAL_PROXY_HOST requires LOCAL_PROXY_USER and LOCAL_PROXY_PASS")

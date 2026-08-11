@@ -9,14 +9,12 @@ UI_PORT="${UI_PORT:-8787}"
 PROXY_PORT="${PROXY_PORT:-7928}"
 DATA_DIR="${DATA_DIR:-/data/conduitvpn}"
 PROXY_HOST="${PROXY_HOST:-127.0.0.1}"
-UI_BIND_HOST="${UI_BIND_HOST:-${UI_HOST:-0.0.0.0}}"
+UI_BIND_HOST="${UI_BIND_HOST:-${UI_HOST:-127.0.0.1}}"
 HY2_PORT="${HY2_PORT:-0}"              # hysteria2 入站端口（0=关闭）
 HY2_PASSWORD="${HY2_PASSWORD:-}"
 HY2_OBFS_PASSWORD="${HY2_OBFS_PASSWORD:-}"
 UI_USER="${UI_USER:-}"
 UI_PASSWORD="${UI_PASSWORD:-}"
-UI_TLS_CERT="${UI_TLS_CERT:-}"
-UI_TLS_KEY="${UI_TLS_KEY:-}"
 PROXY_USER="${LOCAL_PROXY_USER:-}"
 PROXY_PASS="${LOCAL_PROXY_PASS:-}"
 
@@ -33,10 +31,6 @@ if [ "$HY2_PORT" != "0" ] && [ "${#HY2_PASSWORD}" -lt 16 ]; then
 fi
 if [ -z "$UI_USER" ] || [ "${#UI_PASSWORD}" -lt 16 ]; then
     echo "[错误] 生产部署必须设置 UI_USER 和至少 16 个字符的 UI_PASSWORD"
-    exit 1
-fi
-if [ ! -f "$UI_TLS_CERT" ] || [ ! -f "$UI_TLS_KEY" ]; then
-    echo "[错误] 必须设置存在的 UI_TLS_CERT 和 UI_TLS_KEY 文件"
     exit 1
 fi
 if [ -z "$PROXY_USER" ] || [ "${#PROXY_PASS}" -lt 16 ]; then
@@ -65,8 +59,6 @@ ENV_ARGS=(
     -e UI_HOST=0.0.0.0
     -e UI_USER="$UI_USER"
     -e UI_PASSWORD="$UI_PASSWORD"
-    -e UI_TLS_CERT=/run/conduitvpn-tls/cert.pem
-    -e UI_TLS_KEY=/run/conduitvpn-tls/key.pem
     -e LOCAL_PROXY_HOST=0.0.0.0
     -e LOCAL_PROXY_PORT=7928
     -e LOCAL_PROXY_USER="$PROXY_USER"
@@ -74,8 +66,6 @@ ENV_ARGS=(
 )
 MOUNT_ARGS=(
     -v "$DATA_DIR:/data/conduitvpn"
-    -v "$UI_TLS_CERT:/run/conduitvpn-tls/cert.pem:ro"
-    -v "$UI_TLS_KEY:/run/conduitvpn-tls/key.pem:ro"
 )
 if [ "$HY2_PORT" != "0" ]; then
     PORT_ARGS+=( -p "$HY2_PORT:$HY2_PORT/udp" )
@@ -98,7 +88,7 @@ docker run -d \
 
 echo
 echo "✅ 部署完成！"
-echo "   后台地址: https://<你的IP>:$UI_PORT/  (需登录)"
+echo "   后台地址: http://127.0.0.1:$UI_PORT/  (由 Cloudflare Tunnel 或本机反向代理访问)"
 echo "   代理端口: $PROXY_HOST:$PROXY_PORT (HTTP + SOCKS5 双协议)"
 if [ "$HY2_PORT" != "0" ]; then
     echo "   hy2 入站: 0.0.0.0:$HY2_PORT/udp (hysteria2, 需 HY2_PASSWORD)"

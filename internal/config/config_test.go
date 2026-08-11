@@ -13,14 +13,10 @@ func TestValidateSecurityBoundaries(t *testing.T) {
 	if err := base.Validate(); err != nil {
 		t.Fatalf("loopback config rejected: %v", err)
 	}
-	remoteUI := base
-	remoteUI.UIHost = "0.0.0.0"
-	if err := remoteUI.Validate(); err == nil {
-		t.Fatal("remote UI without TLS should be rejected")
-	}
-	remoteUI.UITLSCert, remoteUI.UITLSKey = "cert.pem", "key.pem"
-	if err := remoteUI.Validate(); err != nil {
-		t.Fatalf("remote TLS UI rejected: %v", err)
+	partialTLS := base
+	partialTLS.UITLSCert = "cert.pem"
+	if err := partialTLS.Validate(); err == nil {
+		t.Fatal("partial TLS configuration should be rejected")
 	}
 	remoteProxy := base
 	remoteProxy.LocalProxyHost = "0.0.0.0"
