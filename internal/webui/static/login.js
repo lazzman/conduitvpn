@@ -1,6 +1,7 @@
 "use strict";
 
 (() => {
+  window.ConduitTheme.initControls();
   const form = document.getElementById("login_form");
   const btn = document.getElementById("submit_btn");
   const err = document.getElementById("login_err");

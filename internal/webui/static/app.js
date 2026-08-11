@@ -3,67 +3,6 @@
 
 const $ = (id) => document.getElementById(id);
 
-/* ---- theme ---- */
-// Three-way theme: system (follow OS) / dark / light, persisted.
-const themeBtn = $("btn-theme");
-const themeMenu = $("theme-menu");
-const themeMenuWrap = $("theme-menu-wrap");
-const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-let theme = localStorage.getItem("conduit-theme") || "system";
-if (!["system", "dark", "light"].includes(theme)) theme = "system";
-
-const THEME_TITLE = { system: "主题：跟随系统", dark: "主题：深色", light: "主题：浅色" };
-
-function effectiveTheme() {
-  return theme === "system" ? (darkQuery.matches ? "dark" : "light") : theme;
-}
-
-function applyTheme() {
-  const eff = effectiveTheme();
-  document.documentElement.dataset.theme = eff;
-  document.querySelector('meta[name="color-scheme"]').setAttribute(
-    "content", theme === "system" ? "dark light" : eff);
-  $("icon-theme-sun").hidden = theme !== "light";
-  $("icon-theme-moon").hidden = theme !== "dark";
-  $("icon-theme-monitor").hidden = theme !== "system";
-  themeBtn.title = THEME_TITLE[theme];
-  document.querySelectorAll(".theme-option").forEach((option) => {
-    const selected = option.dataset.theme === theme;
-    option.classList.toggle("active", selected);
-    option.setAttribute("aria-checked", String(selected));
-  });
-}
-
-function closeThemeMenu() {
-  themeMenu.hidden = true;
-  themeBtn.setAttribute("aria-expanded", "false");
-}
-
-themeBtn.addEventListener("click", (event) => {
-  event.stopPropagation();
-  themeMenu.hidden = !themeMenu.hidden;
-  themeBtn.setAttribute("aria-expanded", String(!themeMenu.hidden));
-});
-themeMenu.addEventListener("click", (event) => {
-  const option = event.target.closest(".theme-option");
-  if (!option) return;
-  theme = option.dataset.theme;
-  localStorage.setItem("conduit-theme", theme);
-  applyTheme();
-  drawChart();
-  closeThemeMenu();
-});
-document.addEventListener("click", (event) => {
-  if (!themeMenuWrap.contains(event.target)) closeThemeMenu();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeThemeMenu();
-});
-darkQuery.addEventListener("change", () => {
-  if (theme === "system") { applyTheme(); drawChart(); }
-});
-applyTheme();
-
 /* ---- state pill ---- */
 /* ---- state pill ---- */
 const STATE_LABEL = {
@@ -484,6 +423,15 @@ let logLevel = "all";
 let follow = true;
 
 const LEVELS = { debug: 1, info: 2, warn: 3, error: 4 };
+const logTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+});
+
+function formatLogTime(timestamp) {
+  const time = new Date(timestamp);
+  return Number.isNaN(time.getTime()) ? "" : logTimeFormatter.format(time);
+}
 
 function appendLog(entry) {
   const view = $("log-view");
@@ -491,7 +439,7 @@ function appendLog(entry) {
   const lvl = entry.lvl || "info";
   const line = document.createElement("span");
   line.className = `log-line lvl-${lvl}`;
-  const ts = (entry.ts || "").slice(11, 19) || "";
+  const ts = formatLogTime(entry.ts);
   const kv = Object.entries(entry)
     .filter(([k]) => k !== "ts" && k !== "lvl" && k !== "msg")
     .map(([k, v]) => `${k}=${v}`)
@@ -587,6 +535,8 @@ function connectStream() {
 }
 
 /* ---- boot ---- */
+document.addEventListener("conduit-theme-change", drawChart);
+window.ConduitTheme.initControls();
 fetch("./api/state")
   .then((r) => r.json())
   .then((snap) => {

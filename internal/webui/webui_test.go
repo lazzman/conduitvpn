@@ -18,6 +18,7 @@ func TestStaticAssetVersionStable(t *testing.T) {
 		"static/index.html": &fstest.MapFile{Data: []byte("index")},
 		"static/login.html": &fstest.MapFile{Data: []byte("login")},
 		"static/styles.css": &fstest.MapFile{Data: []byte("styles")},
+		"static/theme.js":   &fstest.MapFile{Data: []byte("theme script")},
 		"static/app.js":     &fstest.MapFile{Data: []byte("app")},
 		"static/login.js":   &fstest.MapFile{Data: []byte("login script")},
 	}
@@ -37,12 +38,13 @@ func TestStaticAssetVersionChangesWithContent(t *testing.T) {
 		"static/index.html": &fstest.MapFile{Data: []byte("index")},
 		"static/login.html": &fstest.MapFile{Data: []byte("login")},
 		"static/styles.css": &fstest.MapFile{Data: []byte("styles")},
+		"static/theme.js":   &fstest.MapFile{Data: []byte("theme script")},
 		"static/app.js":     &fstest.MapFile{Data: []byte("app")},
 		"static/login.js":   &fstest.MapFile{Data: []byte("login script")},
 	}
 
 	before := staticAssetVersion(fsys)
-	fsys["static/app.js"] = &fstest.MapFile{Data: []byte("app changed")}
+	fsys["static/theme.js"] = &fstest.MapFile{Data: []byte("theme script changed")}
 	after := staticAssetVersion(fsys)
 	if before == after {
 		t.Fatalf("asset content change did not change version: %q", before)
@@ -75,7 +77,7 @@ func TestEmbeddedRegionLabels(t *testing.T) {
 }
 
 func TestEmbeddedScriptsDoNotUseHTMLInjection(t *testing.T) {
-	for _, name := range []string{"static/app.js", "static/login.js"} {
+	for _, name := range []string{"static/theme.js", "static/app.js", "static/login.js"} {
 		data, err := staticFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -83,6 +85,27 @@ func TestEmbeddedScriptsDoNotUseHTMLInjection(t *testing.T) {
 		if strings.Contains(string(data), "innerHTML") || strings.Contains(string(data), "insertAdjacentHTML") {
 			t.Fatalf("%s contains an HTML injection API", name)
 		}
+	}
+}
+
+func TestEmbeddedLoginThemeUI(t *testing.T) {
+	login, err := staticFS.ReadFile("static/login.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(login)
+	for _, want := range []string{
+		`src="./theme.js?v=__VER__"`,
+		`data-theme-control`,
+		`data-theme-button`,
+		`data-theme-menu`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("login.html is missing %q", want)
+		}
+	}
+	if strings.Contains(page, "<script>\n") {
+		t.Fatal("login.html contains an inline script blocked by CSP")
 	}
 }
 

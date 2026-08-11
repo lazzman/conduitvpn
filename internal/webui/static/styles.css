@@ -184,6 +184,12 @@ body {
   min-height: 100dvh;
   padding: 20px;
 }
+.login-theme-control {
+  position: fixed;
+  top: 18px;
+  right: 20px;
+  z-index: 10;
+}
 .login-card {
   width: 340px;
   background: var(--surface);
@@ -578,4 +584,5 @@ td.lat-dead { color: var(--text-3); }
   .site-footer { padding: 4px 14px 20px; }
   .brand-sub { display: none; }
   .input { width: 110px; }
+  .login-theme-control { top: 12px; right: 12px; }
 }

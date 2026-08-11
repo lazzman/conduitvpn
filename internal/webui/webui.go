@@ -38,6 +38,7 @@ var versionedAssets = []string{
 	"static/index.html",
 	"static/login.html",
 	"static/styles.css",
+	"static/theme.js",
 	"static/app.js",
 	"static/login.js",
 }

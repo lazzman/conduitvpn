@@ -5,13 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>ConduitVPN · 登录</title>
-<script>
-  document.documentElement.dataset.theme =
-    window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-</script>
+<script src="./theme.js?v=__VER__"></script>
 <link rel="stylesheet" href="./styles.css?v=__VER__">
 </head>
 <body class="login-body">
+  <div class="login-theme-control theme-menu-wrap" data-theme-control>
+    <button class="btn btn-ghost btn-icon" type="button" data-theme-button title="主题：跟随系统" aria-label="打开主题菜单" aria-haspopup="menu" aria-expanded="false">
+      <svg data-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l-1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      <svg data-theme-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg data-theme-icon="system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    </button>
+    <div class="theme-menu" data-theme-menu role="menu" hidden>
+      <button class="theme-option" type="button" role="menuitemradio" data-theme="system" title="跟随系统" aria-label="跟随系统" aria-checked="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </button>
+      <button class="theme-option" type="button" role="menuitemradio" data-theme="dark" title="深色" aria-label="深色" aria-checked="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <button class="theme-option" type="button" role="menuitemradio" data-theme="light" title="浅色" aria-label="浅色" aria-checked="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l-1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </button>
+    </div>
+  </div>
   <div class="login-card">
     <div class="brand login-brand">
       <div class="brand-mark" aria-hidden="true"><span>▲</span></div>
