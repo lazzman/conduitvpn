@@ -46,6 +46,35 @@ func SecureDir(dir string) error {
 	})
 }
 
+const startupTemplateName = "conduitvpn.env.example"
+
+// EnsureStartupTemplate creates a non-sensitive host-mode configuration
+// template only when a newly secured data directory is otherwise empty.
+func EnsureStartupTemplate(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	if len(entries) != 0 {
+		return false, nil
+	}
+	path := filepath.Join(dir, startupTemplateName)
+	const contents = `# ConduitVPN host-mode startup template.
+# Provide these values through your service manager or shell environment.
+NETWORK_MODE=host
+UI_USER=admin
+UI_PASSWORD=
+LOCAL_PROXY_HOST=127.0.0.1
+LOCAL_PROXY_USER=proxy
+LOCAL_PROXY_PASS=
+HY2_PORT=0
+`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) NodesPath() string { return filepath.Join(s.dir, "nodes.json") }
 
 func (s *Store) SaveNodes(nodes []*node.Node) error {

@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"conduitvpn/internal/egress"
 )
 
 type Prober struct {
@@ -21,12 +23,11 @@ type Prober struct {
 	client  *http.Client
 }
 
-func NewProber(addr string, timeout time.Duration) *Prober {
+func NewProber(addr string, timeout time.Duration, egressCtl *egress.Controller) *Prober {
 	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   timeout,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return egressCtl.DialContext(ctx, network, address, timeout, 30*time.Second)
+		},
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	return &Prober{

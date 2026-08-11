@@ -21,12 +21,12 @@ import (
 type EventType int
 
 const (
-	EventLog EventType = iota // ordinary output line
-	EventHandshake            // "Initialization Sequence Completed"
-	EventAuthFail             // AUTH_FAILED
-	EventTunFail              // TUN/TAP unavailable
-	EventFatal                // unrecoverable openvpn error line
-	EventExit                 // process reaped
+	EventLog       EventType = iota // ordinary output line
+	EventHandshake                  // "Initialization Sequence Completed"
+	EventAuthFail                   // AUTH_FAILED
+	EventTunFail                    // TUN/TAP unavailable
+	EventFatal                      // unrecoverable openvpn error line
+	EventExit                       // process reaped
 )
 
 func (t EventType) String() string {
@@ -52,10 +52,11 @@ type Event struct {
 }
 
 type Options struct {
-	ConfigFile string
-	AuthFile   string
-	Dev        string
-	Verb       int
+	ConfigFile  string
+	AuthFile    string
+	Dev         string
+	Verb        int
+	RouteNoPull bool
 }
 
 type Tunnel struct {
@@ -65,6 +66,7 @@ type Tunnel struct {
 	exitCh      chan struct{}
 	tail        []string
 	tailMax     int
+	device      string
 	mu          sync.Mutex
 	killed      bool
 }
@@ -79,6 +81,13 @@ func New() *Tunnel {
 }
 
 func (t *Tunnel) Events() <-chan Event { return t.events }
+
+// Device returns the tunnel device reported by OpenVPN after it has opened it.
+func (t *Tunnel) Device() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.device
+}
 
 func (t *Tunnel) Running() bool {
 	t.mu.Lock()
@@ -126,6 +135,9 @@ func (t *Tunnel) Start(opts Options) error {
 	}
 	if opts.AuthFile != "" {
 		args = append(args, "--auth-user-pass", opts.AuthFile)
+	}
+	if opts.RouteNoPull {
+		args = append(args, "--route-nopull")
 	}
 
 	cmd := exec.Command("openvpn", args...)
@@ -224,6 +236,7 @@ func (t *Tunnel) scan(r io.Reader, tag string) {
 }
 
 func (t *Tunnel) classify(line string) {
+	t.captureDevice(line)
 	lower := strings.ToLower(line)
 	switch {
 	case strings.Contains(lower, "initialization sequence completed"):
@@ -240,6 +253,35 @@ func (t *Tunnel) classify(line string) {
 	default:
 		t.emit(EventLog, line)
 	}
+}
+
+func (t *Tunnel) captureDevice(line string) {
+	for _, field := range strings.Fields(line) {
+		field = strings.Trim(field, "[]():,.")
+		name := strings.TrimPrefix(field, "/dev/")
+		if isTunnelDevice(name) {
+			t.mu.Lock()
+			t.device = name
+			t.mu.Unlock()
+			return
+		}
+	}
+}
+
+func isTunnelDevice(name string) bool {
+	prefix := "tun"
+	if strings.HasPrefix(name, "utun") {
+		prefix = "utun"
+	}
+	if !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
+		return false
+	}
+	for _, ch := range name[len(prefix):] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (t *Tunnel) capture(line string) {

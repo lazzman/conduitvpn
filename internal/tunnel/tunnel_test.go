@@ -53,6 +53,21 @@ func TestWaitHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestCaptureDevice(t *testing.T) {
+	tun := New()
+	tun.captureDevice("[out] TUN/TAP device /dev/tun0 opened")
+	if got := tun.Device(); got != "tun0" {
+		t.Fatalf("linux device = %q, want tun0", got)
+	}
+	tun.captureDevice("[out] Opened utun device utun7")
+	if got := tun.Device(); got != "utun7" {
+		t.Fatalf("darwin device = %q, want utun7", got)
+	}
+	if isTunnelDevice("tunnel") || isTunnelDevice("tun") || isTunnelDevice("utun") {
+		t.Fatal("non-device names must not be accepted")
+	}
+}
+
 func TestStopIdle(t *testing.T) {
 	tun := New()
 	if err := tun.Stop(); err != nil {

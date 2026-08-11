@@ -22,6 +22,8 @@
 
 ## 🏗️ 架构
 
+### Docker 部署：方案 B（`NETWORK_MODE=container`）
+
 ```mermaid
 flowchart TB
     subgraph CLIENT["客户端"]
@@ -30,7 +32,7 @@ flowchart TB
         L3["浏览器<br/>管理后台 → :8787"]
     end
 
-    subgraph VPS["VPS · Docker 容器 (conduitvpn)"]
+    subgraph VPS["Docker 容器 (conduitvpn)"]
         P["双协议代理<br/>首字节嗅探 HTTP+SOCKS5"]
         H["hy2 入站<br/>sing-box hysteria2"]
         T["方案 B 路由<br/>redirect-gateway → tun0"]
@@ -51,9 +53,37 @@ flowchart TB
     M --> OV
 ```
 
+### 二进制部署：方案 A（`NETWORK_MODE=host`）
+
+```mermaid
+flowchart TB
+    C1["本地工具<br/>HTTP / SOCKS5 → :7928"]
+    C2["浏览器<br/>管理后台 → :8787"]
+    API["VPNGate API"]
+    NODE["VPNGate 节点"]
+
+    subgraph HOST["Linux / macOS 宿主机"]
+        P["双协议代理"]
+        E["egress<br/>受控 socket"]
+        R["Linux: mark + table 51820<br/>macOS: IP_BOUND_IF"]
+        T["tun0 / utun"]
+        OV["openvpn 进程"]
+        M["监督状态机"]
+        W["Web UI"]
+        MAIN["主机默认路由<br/>节点拉取 / OpenVPN 控制连接 / UI 回包"]
+    end
+
+    C1 --> P --> E --> R --> T
+    C2 --> W --> M
+    M --> OV --> NODE
+    M --> MAIN --> API
+```
+
 ### 核心设计
 
-**方案 B（全隧道）**：openvpn 使用服务端推送的 `redirect-gateway`，容器默认路由走 `tun0`。相比 Python 原版的方案 A，砍掉了三个子系统（策略路由、`SO_BINDTODEVICE`、tun0 自定义 DNS），代价是入站服务的回包会被送进 VPN——由 **netfix**（connmark 标记入站连接 → 回包走 docker 网关）修复。
+**容器方案 B（全隧道）**：`NETWORK_MODE=container` 时，openvpn 使用服务端推送的 `redirect-gateway`，容器默认路由走 `tun0`。入站服务的回包由 **netfix**（connmark 标记入站连接 → 回包走 docker 网关）修复；Docker 镜像固定使用此模式。
+
+**宿主机方案 A（定向隧道）**：`NETWORK_MODE=host` 时，OpenVPN 不接收服务端路由。HTTP/SOCKS 的 TCP、DNS、健康探测和实时延迟通过专用 socket 路由至隧道，宿主机默认流量、Web UI、节点拉取和 OpenVPN 控制连接保持原网络路径。隧道未就绪或漂移时，代理拒绝出站以防止直连泄漏。
 
 **监督状态机**：单协程独占隧道生命周期。
 
@@ -75,6 +105,7 @@ internal/
 ├── health/              HTTPS 探测（硬编码 IP，零 DNS 依赖）
 ├── manager/             监督状态机 + 路由模式筛选 + 实时延迟测量
 ├── proxy/               单端口双协议（HTTP+SOCKS5）+ 隧道内 DNS
+├── egress/              方案 A 的受控 socket 出口与平台路由
 ├── netfix/              方案 B 回包路由修复（TCP/UDP connmark）
 ├── state/               JSON 原子持久化（节点/黑名单/路由/UI secret）
 ├── logx/                分级 JSON 日志 + 环形缓冲 + SSE 订阅
@@ -134,6 +165,30 @@ docker run -d --name conduitvpn \
 ```
 
 镜像发布在 GitHub Container Registry，CI 每次推送自动构建 amd64/arm64。
+
+### 直接运行二进制（宿主机方案 A）
+
+宿主机模式仅支持 Linux 和 macOS，必须显式设置 `NETWORK_MODE=host`。它要求管理员权限以创建 TUN 设备；Linux 还需要 `iproute2`。Linux 可安装 `openvpn iproute2 ca-certificates`，macOS 可通过 Homebrew 安装 `openvpn`。两种平台均应在隔离的主机或 VM 中运行生产实例。
+
+未设置目录时，host 模式默认使用当前工作目录的 `./data`；Docker 仍使用 `/data/conduitvpn`。`--data-dir` 优先于 `CONDUIT_DATA_DIR`。首次使用空数据目录时会自动创建权限为 `0700` 的目录和 `conduitvpn.env.example` 启动模板（`0600`）；模板不包含密码，生产凭据仍须显式提供。
+
+```bash
+CGO_ENABLED=0 go build -trimpath -o conduitvpn ./cmd/conduitvpn
+
+sudo env NETWORK_MODE=host \
+  UI_USER=admin UI_PASSWORD='至少16字符的随机密码' \
+  LOCAL_PROXY_USER=proxy LOCAL_PROXY_PASS='至少16字符的随机密码' \
+  ./conduitvpn
+```
+
+指定其他目录：
+
+```bash
+sudo env NETWORK_MODE=host UI_USER=admin UI_PASSWORD='至少16字符的随机密码' \
+  ./conduitvpn --data-dir /var/lib/conduitvpn
+```
+
+此模式只支持 HTTP/SOCKS5，`HY2_PORT` 必须保持为 `0`。Linux 使用专用策略路由表，macOS 将受控 socket 绑定到 OpenVPN 创建的 `utun` 接口；两者均不修改系统默认路由。
 
 ### UI 演示模式
 
@@ -204,7 +259,9 @@ curl -X PUT -d '{"mode":"auto"}' http://127.0.0.1:8787/<secret>/api/route
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `CONDUIT_DATA_DIR` | `/data/conduitvpn` | 数据目录 |
+| `NETWORK_MODE` | 必填（生产） | `container` 为 Docker 方案 B；`host` 为 Linux/macOS 宿主机方案 A，且不支持 hy2 |
+| `--data-dir` | 空 | 命令行数据目录，优先级高于 `CONDUIT_DATA_DIR` |
+| `CONDUIT_DATA_DIR` | container: `/data/conduitvpn`；host: `./data` | 数据目录；host 的空目录会生成 `conduitvpn.env.example` 模板 |
 | `LOG_LEVEL` | `info` | debug / info / warn / error |
 | **节点获取** | | |
 | `VPNGATE_API_URL` | `https://www.vpngate.net/api/iphone/` | 节点源 |

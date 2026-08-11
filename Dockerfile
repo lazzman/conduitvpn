@@ -28,7 +28,8 @@ RUN apk add --no-cache openvpn ca-certificates iproute2 iptables tzdata
 COPY --from=build /out/conduitvpn /usr/local/bin/conduitvpn
 COPY --from=singbox /usr/local/bin/sing-box /usr/local/bin/sing-box
 
-ENV CONDUIT_DATA_DIR=/data/conduitvpn
+ENV CONDUIT_DATA_DIR=/data/conduitvpn \
+    NETWORK_MODE=container
 
 VOLUME ["/data/conduitvpn"]
 EXPOSE 8787 7928

@@ -3,14 +3,18 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"net"
+	"net/http"
 	"testing"
+
+	"conduitvpn/internal/egress"
 )
 
 // TestSocks5RequestParsing exercises the request path with a fake
 // upstream: greeting → CONNECT to 1.2.3.4:80 → relay.
 func TestSocks5RequestParsing(t *testing.T) {
-	s := New("127.0.0.1", 0, "", "", "8.8.8.8", 10)
+	s := New("127.0.0.1", 0, "", "", "8.8.8.8", 10, egress.New("container"))
 
 	client, server := net.Pipe()
 	defer client.Close()
@@ -66,16 +70,30 @@ func TestReadSocksAddr(t *testing.T) {
 
 func TestNormalizeTarget(t *testing.T) {
 	cases := map[string]string{
-		"example.com:443":      "example.com:443",
-		"example.com":          "example.com:80",
-		"https://example.com":  "example.com:80",
+		"example.com:443":       "example.com:443",
+		"example.com":           "example.com:80",
+		"https://example.com":   "example.com:80",
 		"http://example.com:90": "example.com:90",
-		"[::1]:8080":           "[::1]:8080",
+		"[::1]:8080":            "[::1]:8080",
 	}
 	for in, want := range cases {
 		if got := normalizeTarget(in); got != want {
 			t.Errorf("normalizeTarget(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestHTTPProxyAuth(t *testing.T) {
+	s := New("127.0.0.1", 0, "proxy", "correct-password", "8.8.8.8", 10, egress.New("container"))
+	req := &http.Request{Header: make(http.Header)}
+	req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("proxy:correct-password")))
+	if !s.checkHTTPAuth(req) {
+		t.Fatal("valid Proxy-Authorization should pass")
+	}
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("proxy:correct-password")))
+	req.Header.Del("Proxy-Authorization")
+	if s.checkHTTPAuth(req) {
+		t.Fatal("origin Authorization must not authenticate the proxy")
 	}
 }
 

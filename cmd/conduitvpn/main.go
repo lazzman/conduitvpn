@@ -24,12 +24,16 @@ import (
 
 func main() {
 	demo := flag.Bool("demo", false, "start the interactive Web UI demo without VPN or proxy services")
+	dataDir := flag.String("data-dir", "", "state directory (overrides CONDUIT_DATA_DIR)")
 	flag.Parse()
 
 	cfg := config.Load()
 	if *demo {
 		cfg.Demo = true
 		cfg.DataDir = config.DemoDataDir()
+	}
+	if dir := strings.TrimSpace(*dataDir); dir != "" {
+		cfg.DataDir = dir
 	}
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "invalid configuration:", err)
@@ -40,6 +44,14 @@ func main() {
 	if err := state.SecureDir(cfg.DataDir); err != nil {
 		logx.Error("cannot secure data dir", "dir", cfg.DataDir, "err", err)
 		os.Exit(1)
+	}
+	if !cfg.Demo && cfg.NetworkMode == "host" {
+		if created, err := state.EnsureStartupTemplate(cfg.DataDir); err != nil {
+			logx.Error("cannot create startup template", "dir", cfg.DataDir, "err", err)
+			os.Exit(1)
+		} else if created {
+			logx.Info("host startup template created", "path", cfg.DataDir+"/conduitvpn.env.example")
+		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -71,41 +83,43 @@ func main() {
 			logx.Info("openvpn found", "version", v)
 		}
 
-		// 方案 B 回包路由修复：入站 UI/代理连接的响应走 docker 网关，
-		// 出站代理流量仍走 VPN。失败不影响主流程（仅入站回包降级）。
-		udpPorts := []string{}
-		if cfg.HY2Port > 0 {
-			udpPorts = append(udpPorts, fmt.Sprint(cfg.HY2Port))
-		}
-		if err := netfix.Apply([]string{fmt.Sprint(cfg.UIPort), fmt.Sprint(cfg.LocalProxyPort)}, udpPorts); err != nil {
-			logx.Warn("netfix skipped", "err", err)
-		} else {
-			logx.Info("netfix applied", "tcp", fmt.Sprint(cfg.UIPort)+","+fmt.Sprint(cfg.LocalProxyPort), "udp", strings.Join(udpPorts, ","))
-		}
-
-		// hy2 inbound gateway (hysteria2 clients → 方案 B tunnel)
-		if cfg.HY2Port > 0 {
-			hy2Runner, err := hy2.Start(ctx, cfg.DataDir, hy2.Config{
-				Port:     cfg.HY2Port,
-				Bind:     cfg.HY2Bind,
-				Password: cfg.HY2Password,
-				ObfsPass: cfg.HY2ObfsPassword,
-			})
-			if err != nil {
-				logx.Error("hy2 start failed", "err", err)
-				os.Exit(1)
+		if cfg.NetworkMode == "container" {
+			// 方案 B only: repair replies for listeners whose default route is
+			// redirected into the container tunnel.
+			udpPorts := []string{}
+			if cfg.HY2Port > 0 {
+				udpPorts = append(udpPorts, fmt.Sprint(cfg.HY2Port))
 			}
-			defer hy2Runner.Stop()
+			if err := netfix.Apply([]string{fmt.Sprint(cfg.UIPort), fmt.Sprint(cfg.LocalProxyPort)}, udpPorts); err != nil {
+				logx.Warn("netfix skipped", "err", err)
+			} else {
+				logx.Info("netfix applied", "tcp", fmt.Sprint(cfg.UIPort)+","+fmt.Sprint(cfg.LocalProxyPort))
+			}
+
+			// hy2 inbound gateway (hysteria2 clients → 方案 B tunnel)
+			if cfg.HY2Port > 0 {
+				hy2Runner, err := hy2.Start(ctx, cfg.DataDir, hy2.Config{
+					Port:     cfg.HY2Port,
+					Bind:     cfg.HY2Bind,
+					Password: cfg.HY2Password,
+					ObfsPass: cfg.HY2ObfsPassword,
+				})
+				if err != nil {
+					logx.Error("hy2 start failed", "err", err)
+					os.Exit(1)
+				}
+				defer hy2Runner.Stop()
+			}
 		}
 
-		proxySrv := proxy.New(cfg.LocalProxyHost, cfg.LocalProxyPort, cfg.ProxyUser, cfg.ProxyPass, cfg.DNSServer, cfg.ProxyMaxConns)
+		m = manager.New(cfg)
+		proxySrv := proxy.New(cfg.LocalProxyHost, cfg.LocalProxyPort, cfg.ProxyUser, cfg.ProxyPass, cfg.DNSServer, cfg.ProxyMaxConns, m.Egress())
 		if err := proxySrv.Start(); err != nil {
 			logx.Error("proxy start failed", "err", err)
 			os.Exit(1)
 		}
 		defer proxySrv.Close()
 		logx.Info("proxy listening", "addr", proxySrv.Addr().String(), "dual", "http+socks5")
-		m = manager.New(cfg)
 	}
 
 	ui := webui.New(cfg, store, m)
@@ -127,7 +141,7 @@ func main() {
 		return
 	}
 
-	logx.Info("conduitvpn starting", "data_dir", cfg.DataDir)
+	logx.Info("conduitvpn starting", "data_dir", cfg.DataDir, "network_mode", cfg.NetworkMode)
 	if err := m.Run(ctx); err != nil && ctx.Err() == nil {
 		logx.Error("manager exited", "err", err)
 		os.Exit(1)

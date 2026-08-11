@@ -16,7 +16,10 @@ import (
 
 type Config struct {
 	// Demo enables the isolated UI preview behavior selected by --demo.
-	Demo             bool
+	Demo bool
+	// NetworkMode selects the tunnel routing strategy: container (方案 B)
+	// or host (方案 A).
+	NetworkMode      string
 	DataDir          string
 	APIURL           string
 	FetchTimeout     time.Duration
@@ -97,8 +100,10 @@ func envInt(key string, def int) int {
 }
 
 func Load() Config {
+	networkMode := envStr("NETWORK_MODE", "")
 	return Config{
-		DataDir:          envStr("CONDUIT_DATA_DIR", "/data/conduitvpn"),
+		NetworkMode:      networkMode,
+		DataDir:          envStr("CONDUIT_DATA_DIR", DefaultDataDir(networkMode)),
 		APIURL:           envStr("VPNGATE_API_URL", "https://www.vpngate.net/api/iphone/"),
 		FetchTimeout:     time.Duration(envInt("FETCH_TIMEOUT_SECONDS", 30)) * time.Second,
 		FetchInterval:    time.Duration(envInt("FETCH_INTERVAL_SECONDS", 1260)) * time.Second,
@@ -153,9 +158,24 @@ func Load() Config {
 	}
 }
 
+// DefaultDataDir selects a project-local directory for direct host runs while
+// preserving the stable mounted path used by the container image.
+func DefaultDataDir(networkMode string) string {
+	if networkMode == "host" {
+		return "./data"
+	}
+	return "/data/conduitvpn"
+}
+
 // Validate rejects insecure listener and credential combinations before any
 // network service starts. Existing UI credentials are handled by state.Store.
 func (c Config) Validate() error {
+	if !c.Demo && c.NetworkMode != "container" && c.NetworkMode != "host" {
+		return fmt.Errorf("NETWORK_MODE must be explicitly set to container or host")
+	}
+	if c.NetworkMode == "host" && c.HY2Port != 0 {
+		return fmt.Errorf("HY2_PORT is not supported when NETWORK_MODE=host")
+	}
 	if err := validPort("UI_PORT", c.UIPort, false); err != nil {
 		return err
 	}

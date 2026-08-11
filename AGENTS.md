@@ -14,7 +14,7 @@
 
 - **Go 1.22，零第三方依赖** — 新增功能一律使用标准库，禁止引入外部依赖
 - 单静态二进制：`CGO_ENABLED=0 go build -trimpath -o conduitvpn ./cmd/conduitvpn`
-- 运行时环境：Docker 容器，需要 `NET_ADMIN` 能力 + `/dev/net/tun` 设备
+- 运行时网络模式：Docker 使用 `NETWORK_MODE=container`（需 `NET_ADMIN` + `/dev/net/tun`）；宿主机使用 `NETWORK_MODE=host`（Linux/macOS，HTTP/SOCKS5）
 - 前端为原生 JS + CSS（无框架），通过 `embed` 内嵌进二进制
 
 ## 常用命令
@@ -23,15 +23,18 @@
 make build   # Docker 容器内编译（宿主机可无 Go 工具链）
 make test    # 单测（8 个包）
 make vet     # 静态检查
-# 宿主机装有 Go 时可直接：
-go build -o conduitvpn ./cmd/conduitvpn && ./conduitvpn
+# 宿主机装有 Go 时可构建；生产直接运行必须显式选择网络模式：
+go build -o conduitvpn ./cmd/conduitvpn
+NETWORK_MODE=host ./conduitvpn
+# 可覆盖 host 模式默认的 ./data：
+NETWORK_MODE=host ./conduitvpn --data-dir /var/lib/conduitvpn
 ```
 
 ## 架构要点
 
-### 方案 B（全隧道）
-openvpn 使用服务端推送的 `redirect-gateway`，容器默认路由走 tun0；
-入站服务的回包由 **netfix**（connmark 标记入站连接 → 回包走 docker 网关）修复。
+### 双网络模式
+- `container`（方案 B）：openvpn 接受 `redirect-gateway`，容器默认路由走 tun0；入站回包由 **netfix** 修复。
+- `host`（方案 A）：openvpn 使用 `--route-nopull`；仅代理 TCP、DNS 和探测 socket 通过 tun，宿主机默认路由不变，hy2 不支持。
 
 ### 监督状态机
 单协程独占隧道生命周期：
@@ -49,6 +52,7 @@ openvpn 使用服务端推送的 `redirect-gateway`，容器默认路由走 tun0
 - `internal/health/` — HTTPS 探测（硬编码 IP，零 DNS 依赖）
 - `internal/manager/` — 监督状态机 + 路由模式筛选 + 实时延迟测量
 - `internal/proxy/` — 单端口双协议（HTTP+SOCKS5）+ 隧道内 DNS
+- `internal/egress/` — 宿主机方案 A 的 socket mark/接口绑定与路由清理
 - `internal/netfix/` — 方案 B 回包路由修复（TCP/UDP connmark）
 - `internal/state/` — JSON 原子持久化（节点/黑名单/路由/UI secret）
 - `internal/logx/` — 分级 JSON 日志 + 环形缓冲 + SSE 订阅
@@ -56,7 +60,7 @@ openvpn 使用服务端推送的 `redirect-gateway`，容器默认路由走 tun0
 
 ## 关键约定
 
-- 数据目录 `CONDUIT_DATA_DIR`（默认 `/data/conduitvpn`），JSON 原子写入持久化
+- 数据目录：container 默认 `/data/conduitvpn`；host 默认当前 `./data`。`--data-dir` 优先于 `CONDUIT_DATA_DIR`，空 host 目录会生成无密码的 `conduitvpn.env.example` 模板
 - 日志统一走 `internal/logx`，支持 `LOG_LEVEL`（debug/info/warn/error）
 - API 响应的节点数据脱敏，**不含** OpenVPN 配置（证书/私钥不泄露）
 - Web UI 入口为随机 24 位十六进制安全后缀，root 返回 404

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"conduitvpn/internal/egress"
 	"conduitvpn/internal/logx"
 )
 
@@ -22,6 +23,7 @@ type Server struct {
 	authOn   bool
 	dns      string
 	maxConns int
+	egress   *egress.Controller
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -29,7 +31,7 @@ type Server struct {
 	closed   bool
 }
 
-func New(host string, port int, user, pass, dnsServer string, maxConns int) *Server {
+func New(host string, port int, user, pass, dnsServer string, maxConns int, egressCtl *egress.Controller) *Server {
 	if maxConns < 1 {
 		maxConns = 512
 	}
@@ -42,6 +44,7 @@ func New(host string, port int, user, pass, dnsServer string, maxConns int) *Ser
 		dns:      dnsServer,
 		maxConns: maxConns,
 		limit:    make(chan struct{}, maxConns),
+		egress:   egressCtl,
 	}
 }
 

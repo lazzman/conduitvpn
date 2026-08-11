@@ -4,6 +4,7 @@ import "testing"
 
 func TestValidateSecurityBoundaries(t *testing.T) {
 	base := Config{
+		NetworkMode:    "container",
 		UIHost:         "127.0.0.1",
 		UIPort:         8787,
 		LocalProxyHost: "127.0.0.1",
@@ -34,6 +35,28 @@ func TestValidateSecurityBoundaries(t *testing.T) {
 	}
 }
 
+func TestValidateNetworkMode(t *testing.T) {
+	base := Config{
+		UIHost: "127.0.0.1", UIPort: 8787,
+		LocalProxyHost: "127.0.0.1", LocalProxyPort: 7928, ProxyMaxConns: 128,
+	}
+	if err := base.Validate(); err == nil {
+		t.Fatal("production config without NETWORK_MODE should be rejected")
+	}
+	base.NetworkMode = "invalid"
+	if err := base.Validate(); err == nil {
+		t.Fatal("invalid NETWORK_MODE should be rejected")
+	}
+	base.NetworkMode, base.HY2Port, base.HY2Password = "host", 7929, "1234567890123456"
+	if err := base.Validate(); err == nil {
+		t.Fatal("host mode with hy2 should be rejected")
+	}
+	base.HY2Port = 0
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid host mode rejected: %v", err)
+	}
+}
+
 func TestDemoDataDir(t *testing.T) {
 	t.Setenv("CONDUIT_DATA_DIR", "")
 	if got := DemoDataDir(); got != ".conduitvpn-demo" {
@@ -42,6 +65,22 @@ func TestDemoDataDir(t *testing.T) {
 	t.Setenv("CONDUIT_DATA_DIR", "/tmp/conduit-demo")
 	if got := DemoDataDir(); got != "/tmp/conduit-demo" {
 		t.Fatalf("explicit demo data dir = %q", got)
+	}
+}
+
+func TestDataDirDefaultsByNetworkMode(t *testing.T) {
+	t.Setenv("CONDUIT_DATA_DIR", "")
+	t.Setenv("NETWORK_MODE", "host")
+	if got := Load().DataDir; got != "./data" {
+		t.Fatalf("host data dir = %q, want ./data", got)
+	}
+	t.Setenv("NETWORK_MODE", "container")
+	if got := Load().DataDir; got != "/data/conduitvpn" {
+		t.Fatalf("container data dir = %q, want /data/conduitvpn", got)
+	}
+	t.Setenv("CONDUIT_DATA_DIR", "/tmp/conduitvpn-custom")
+	if got := Load().DataDir; got != "/tmp/conduitvpn-custom" {
+		t.Fatalf("explicit data dir = %q", got)
 	}
 }
 

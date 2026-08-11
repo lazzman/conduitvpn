@@ -1,14 +1,12 @@
 // Package manager is the supervisor: it owns the tunnel lifecycle
-// (fetch → connect → probe → drift) as a single blocking loop. 方案 B
-// means openvpn's pushed redirect-gateway handles routing, so the
-// manager has no policy-routing or SO_BINDTODEVICE concerns.
+// (fetch → connect → probe → drift) as a single blocking loop and enables
+// host-mode egress only after OpenVPN has established its device.
 package manager
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +16,7 @@ import (
 
 	"conduitvpn/internal/benchmark"
 	"conduitvpn/internal/config"
+	"conduitvpn/internal/egress"
 	"conduitvpn/internal/health"
 	"conduitvpn/internal/logx"
 	"conduitvpn/internal/node"
@@ -41,6 +40,7 @@ type Manager struct {
 	cfg    config.Config
 	store  *state.Store
 	prober *health.Prober
+	egress *egress.Controller
 	tun    *tunnel.Tunnel
 
 	state       State
@@ -85,10 +85,12 @@ type Snapshot struct {
 }
 
 func New(cfg config.Config) *Manager {
+	egressCtl := egress.New(cfg.NetworkMode)
 	m := &Manager{
 		cfg:          cfg,
 		store:        state.NewStore(cfg.DataDir),
-		prober:       health.NewProber(cfg.HealthAddr, cfg.ProbeTimeout),
+		prober:       health.NewProber(cfg.HealthAddr, cfg.ProbeTimeout, egressCtl),
+		egress:       egressCtl,
 		state:        StateIdle,
 		blacklist:    map[string]state.BlacklistEntry{},
 		startedAt:    time.Now(),
@@ -105,6 +107,10 @@ func New(cfg config.Config) *Manager {
 	}
 	return m
 }
+
+// Egress exposes the supervisor-owned application egress policy to the
+// proxy server. Its readiness tracks the tunnel lifecycle.
+func (m *Manager) Egress() *egress.Controller { return m.egress }
 
 // NewDemo returns a manager backed by deterministic sample data. It never
 // starts an upstream, tunnel, benchmark, or health probe.
@@ -289,10 +295,7 @@ func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
 			continue
 		}
 		err := m.monitor(ctx, n)
-		if m.tun != nil {
-			_ = m.tun.Stop()
-			m.tun = nil
-		}
+		m.stopTunnel()
 		if err != nil {
 			if errors.Is(err, errModeChanged) {
 				return errModeChanged
@@ -319,16 +322,26 @@ func (m *Manager) connectAndVerify(ctx context.Context, n *node.Node) error {
 
 	tun := tunnel.New()
 	m.tun = tun
-	if err := tun.Start(tunnel.Options{ConfigFile: cfgPath, AuthFile: authPath}); err != nil {
+	if err := tun.Start(tunnel.Options{
+		ConfigFile:  cfgPath,
+		AuthFile:    authPath,
+		RouteNoPull: m.cfg.NetworkMode == "host",
+	}); err != nil {
 		return fmt.Errorf("spawn openvpn: %w", err)
 	}
 	if err := tun.WaitHandshake(m.cfg.ConnectTimeout); err != nil {
-		_ = tun.Stop()
+		m.stopTunnel()
 		return err
+	}
+	if m.cfg.NetworkMode == "host" {
+		if err := m.egress.Configure(tun.Device()); err != nil {
+			m.stopTunnel()
+			return fmt.Errorf("configure host tunnel egress: %w", err)
+		}
 	}
 
 	if !sleepCtx(ctx, m.cfg.ProbeSettle) {
-		_ = tun.Stop()
+		m.stopTunnel()
 		return ctx.Err()
 	}
 
@@ -347,8 +360,16 @@ func (m *Manager) connectAndVerify(ctx context.Context, n *node.Node) error {
 			return ctx.Err()
 		}
 	}
-	_ = tun.Stop()
+	m.stopTunnel()
 	return fmt.Errorf("initial probe degraded: %v", lastErr)
+}
+
+func (m *Manager) stopTunnel() {
+	m.egress.Clear()
+	if m.tun != nil {
+		_ = m.tun.Stop()
+		m.tun = nil
+	}
 }
 
 // monitor runs the liveness loop while connected: HTTPS probe every
@@ -399,9 +420,8 @@ func (m *Manager) monitor(ctx context.Context, n *node.Node) error {
 // measureLiveLatency measures TCP connect time to the node's remote
 // endpoint through the tunnel and updates the dashboard value.
 func (m *Manager) measureLiveLatency(ctx context.Context, n *node.Node) {
-	d := net.Dialer{Timeout: 3 * time.Second}
 	start := time.Now()
-	conn, err := d.DialContext(ctx, "tcp", n.RemoteAddr())
+	conn, err := m.egress.DialContext(ctx, "tcp", n.RemoteAddr(), 3*time.Second, 0)
 	if err != nil {
 		return // node's port may be UDP-only; keep the last value
 	}

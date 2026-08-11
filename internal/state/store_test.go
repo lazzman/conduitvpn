@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -122,6 +123,30 @@ func TestSecureDirRepairsExistingPermissions(t *testing.T) {
 	info, err = os.Stat(nested)
 	if err != nil || info.Mode().Perm() != 0o700 {
 		t.Fatalf("directory permission = %v, err = %v", info.Mode(), err)
+	}
+}
+
+func TestEnsureStartupTemplate(t *testing.T) {
+	dir := t.TempDir()
+	if err := SecureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	created, err := EnsureStartupTemplate(dir)
+	if err != nil || !created {
+		t.Fatalf("template created=%v err=%v", created, err)
+	}
+	path := dir + "/" + startupTemplateName
+	contents, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(contents), "NETWORK_MODE=host") {
+		t.Fatalf("template contents=%q err=%v", contents, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("template permissions=%v err=%v", info.Mode(), err)
+	}
+	created, err = EnsureStartupTemplate(dir)
+	if err != nil || created {
+		t.Fatalf("existing template created=%v err=%v", created, err)
 	}
 }
 
