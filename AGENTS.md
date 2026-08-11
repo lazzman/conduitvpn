@@ -79,3 +79,4 @@ NETWORK_MODE=host ./conduitvpn --data-dir /var/lib/conduitvpn
 - 外部进程（openvpn / sing-box / hy2）统一走子进程管理抽象，修改时保持握手超时、优雅停止、进程回收的既有健壮性
 - 为新增逻辑补充 `*_test.go`，维持既有测试包覆盖
 - 提交信息沿用仓库中文简洁风格（如 `UI: ...`、`模块: 说明`）
+- **禁止主动 git 操作**：除非用户明确要求，不得执行 `git commit`、`git push`、分支创建/合并等操作
