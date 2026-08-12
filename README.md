@@ -23,68 +23,13 @@
 
 ## 🏗️ 架构
 
-### Docker 部署：方案 B（`NETWORK_MODE=container`）
-
-```mermaid
-flowchart TB
-    subgraph CLIENT["客户端"]
-        L1["本地工具<br/>HTTP / SOCKS5 → :7928"]
-        L2["远程设备<br/>hysteria2 → :7929/udp"]
-        L3["浏览器<br/>管理后台 → :8787"]
-    end
-
-    subgraph VPS["Docker 容器 (conduitvpn)"]
-        P["双协议代理<br/>首字节嗅探 HTTP+SOCKS5"]
-        H["hy2 入站<br/>sing-box hysteria2"]
-        T["方案 B 路由<br/>redirect-gateway → tun0"]
-        OV["openvpn 进程"]
-        M["监督状态机<br/>拉取 → 测速 → 连接 → 漂移"]
-        SB["sing-box 上游<br/>单节点 / 订阅多协议"]
-        W["Web UI<br/>REST + SSE"]
-        NF["netfix<br/>入站回包走网关"]
-    end
-
-    API["VPNGate API"]
-    NODES["VPNGate 节点池"]
-
-    L1 --> P --> NF --> T --> OV --> NODES
-    L2 --> H --> NF --> T
-    L3 --> W --> M
-    M --> SB --> API
-    M --> OV
-```
-
-### 二进制部署：方案 A（`NETWORK_MODE=host`）
-
-```mermaid
-flowchart TB
-    C1["本地工具<br/>HTTP / SOCKS5 → :7928"]
-    C2["浏览器<br/>管理后台 → :8787"]
-    API["VPNGate API"]
-    NODE["VPNGate 节点"]
-
-    subgraph HOST["Linux / macOS 宿主机"]
-        P["双协议代理"]
-        E["egress<br/>受控 socket"]
-        R["Linux: mark + table 51820<br/>macOS: IP_BOUND_IF"]
-        T["tun0 / utun"]
-        OV["openvpn 进程"]
-        M["监督状态机"]
-        W["Web UI"]
-        MAIN["主机默认路由<br/>节点拉取 / OpenVPN 控制连接 / UI 回包"]
-    end
-
-    C1 --> P --> E --> R --> T
-    C2 --> W --> M
-    M --> OV --> NODE
-    M --> MAIN --> API
-```
+![ConduitVPN 生产运行架构](docs/architecture.svg)
 
 ### 核心设计
 
-**容器方案 B（全隧道）**：`NETWORK_MODE=container` 时，openvpn 使用服务端推送的 `redirect-gateway`，容器默认路由走 `tun0`。入站服务的回包由 **netfix**（connmark 标记入站连接 → 回包走 docker 网关）修复；Docker 镜像固定使用此模式。
+**容器方案 B（全隧道）**：`NETWORK_MODE=container` 时，openvpn 使用服务端推送的 `redirect-gateway`，容器默认路由走 `tun0`。入站服务的回包由 **netfix**（connmark 标记入站连接，回包走 Docker 网关）修复；Docker 镜像固定使用此模式，也是 hysteria2 入站唯一支持的模式。
 
-**宿主机方案 A（定向隧道）**：`NETWORK_MODE=host` 时，OpenVPN 不接收服务端路由。HTTP/SOCKS 的 TCP、DNS、健康探测和实时延迟通过专用 socket 路由至隧道，宿主机默认流量、Web UI、节点拉取和 OpenVPN 控制连接保持原网络路径。隧道未就绪或漂移时，代理拒绝出站以防止直连泄漏。
+**宿主机方案 A（定向隧道）**：`NETWORK_MODE=host` 时，OpenVPN 不接收服务端路由。`egress` 让 HTTP/SOCKS 的 TCP、DNS、健康探测和实时延迟通过专用 socket 路由至隧道（Linux 使用 socket mark + 路由表，macOS 使用 `IP_BOUND_IF`）；宿主机默认流量、Web UI、节点拉取和 OpenVPN 控制连接保持原网络路径。隧道未就绪或漂移时，代理拒绝出站以防止直连泄漏。
 
 **监督状态机**：单协程独占隧道生命周期。
 
