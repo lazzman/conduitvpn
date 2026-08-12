@@ -4,7 +4,6 @@
 (() => {
   const storageKey = "conduit-theme";
   const themes = ["system", "dark", "light"];
-  const titles = { system: "主题：跟随系统", dark: "主题：深色", light: "主题：浅色" };
   const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
   let theme = localStorage.getItem(storageKey) || "system";
   if (!themes.includes(theme)) theme = "system";
@@ -23,7 +22,7 @@
   function updateControl(control) {
     const button = control.querySelector("[data-theme-button]");
     if (!button) return;
-    button.title = titles[theme];
+    button.title = window.ConduitI18n.t(`theme.${theme}`);
     control.querySelectorAll("[data-theme-icon]").forEach((icon) => {
       icon.hidden = icon.dataset.themeIcon !== theme;
     });
@@ -86,4 +85,7 @@
 
   window.ConduitTheme = { initControls };
   applyTheme();
+  document.addEventListener("conduit-language-change", () => {
+    document.querySelectorAll("[data-theme-control]").forEach(updateControl);
+  });
 })();

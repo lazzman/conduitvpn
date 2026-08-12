@@ -105,7 +105,7 @@ body {
 .brand-name { font-weight: 700; letter-spacing: 0.32em; font-size: 13px; }
 .brand-sub { color: var(--text-3); font-size: 9px; letter-spacing: 0.42em; font-family: var(--mono); }
 
-.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-right { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
 
 /* ---- buttons & inputs ---- */
 .btn {
@@ -118,6 +118,7 @@ body {
   border-radius: var(--radius-sm);
   padding: 7px 14px;
   cursor: pointer;
+  white-space: nowrap;
   transition: transform 0.12s ease, background 0.15s ease, color 0.15s ease;
 }
 .btn:hover { background: var(--accent-strong); }
@@ -146,6 +147,19 @@ body {
 .btn-card-icon { width: 26px; height: 26px; padding: 5px; margin: -4px 0 -4px auto; }
 
 .theme-menu-wrap { position: relative; }
+.language-menu-wrap { position: relative; }
+.language-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+.language-button svg { width: 15px; height: 15px; }
+.topbar-right [data-theme-button],
+.login-controls [data-theme-button] {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
 .theme-menu {
   position: absolute;
   top: calc(100% + 8px);
@@ -179,6 +193,33 @@ body {
   border-color: var(--accent-border);
 }
 .theme-option svg { width: 15px; height: 15px; }
+.language-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 110px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+}
+.language-menu[hidden] { display: none; }
+.language-option {
+  padding: 6px 8px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: 12px var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+.language-option:hover,
+.language-option.active { color: var(--accent); background: var(--accent-dim); border-color: var(--accent-border); }
 
 /* ---- login page ---- */
 .login-body {
@@ -188,11 +229,14 @@ body {
   min-height: 100dvh;
   padding: 20px;
 }
-.login-theme-control {
+.login-controls {
   position: fixed;
   top: 18px;
   right: 20px;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .login-card {
   width: 340px;
@@ -270,6 +314,7 @@ select.input option { background: var(--surface); color: var(--text); }
 .pill {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   gap: 7px;
   font-family: var(--mono);
   font-size: 11px;
@@ -400,7 +445,33 @@ select.input option { background: var(--surface); color: var(--text); }
   text-transform: uppercase;
 }
 
-.panel-actions { display: flex; align-items: center; gap: 10px; }
+.panel-actions { display: flex; align-items: center; gap: 12px; }
+
+.chips {
+  display: inline-flex;
+  align-items: stretch;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.chip {
+  min-width: 42px;
+  padding: 0 10px;
+  color: var(--text-2);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border-strong);
+  font: 600 11.5px var(--sans);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+.chip:last-child { border-right: 0; }
+.chip:hover { color: var(--text); background: var(--surface-2); }
+.chip.active { color: var(--accent); background: var(--accent-dim); }
+.chip:focus-visible { position: relative; outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .count {
   font-size: 12px;
@@ -624,6 +695,13 @@ td.lat-dead { color: var(--text-3); }
   .site-footer { padding: 4px 14px 20px; }
   .brand-sub { display: none; }
   .input { width: 110px; }
-  .login-theme-control { top: 12px; right: 12px; }
+  .topbar { height: auto; min-height: 58px; padding: 10px 14px; }
+  .brand { gap: 7px; }
+  .brand-mark { width: 25px; height: 25px; flex-basis: 25px; }
+  .brand-name { font-size: 11px; letter-spacing: 0.26em; }
+  .topbar-right { gap: 7px; }
+  .pill { width: 30px; height: 34px; justify-content: center; padding: 0; }
+  .pill #status-text { display: none; }
+  .login-controls { top: 12px; right: 12px; }
   .dialog-actions { flex-wrap: wrap; }
 }

@@ -40,6 +40,7 @@ var versionedAssets = []string{
 	"static/login.html",
 	"static/styles.css",
 	"static/theme.js",
+	"static/i18n.js",
 	"static/app.js",
 	"static/login.js",
 	"static/brand-mark.png",
@@ -218,7 +219,7 @@ func (s *Server) handleAll(w http.ResponseWriter, r *http.Request) {
 			s.serveStatic(w, r2)
 			return
 		}
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "Unauthorized")
 		return
 	}
 
@@ -267,12 +268,12 @@ func (s *Server) isAuthorized(r *http.Request) bool {
 
 func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST only")
 		return
 	}
 	remote := clientIP(r)
 	if s.loginBlocked(remote) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "登录失败，请稍后重试"})
+		writeAPIError(w, http.StatusTooManyRequests, "rate_limited", "登录失败，请稍后重试")
 		return
 	}
 	var body struct {
@@ -280,32 +281,32 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "bad json")
 		return
 	}
 	auth, err := s.store.LoadAuth()
 	if err != nil || auth.Username == "" || auth.PasswordHash == "" || auth.PasswordSalt == "" {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "auth not initialized"})
+		writeAPIError(w, http.StatusInternalServerError, "auth_not_initialized", "auth not initialized")
 		return
 	}
 	userOK := subtle.ConstantTimeCompare([]byte(body.Username), []byte(auth.Username)) == 1
 	passOK := auth.VerifyPassword(body.Password)
 	if !userOK || !passOK {
 		s.recordLoginFailure(remote)
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "登录失败"})
+		writeAPIError(w, http.StatusForbidden, "login_failed", "登录失败")
 		return
 	}
 
 	token, err := randToken()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "登录失败"})
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "登录失败")
 		return
 	}
 	s.mu.Lock()
 	s.pruneSessionsLocked(time.Now())
 	if len(s.sessions) >= maxSessions {
 		s.mu.Unlock()
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "会话容量已满"})
+		writeAPIError(w, http.StatusServiceUnavailable, "session_capacity", "会话容量已满")
 		return
 	}
 	s.sessions[token] = time.Now().Add(sessionTTL)
@@ -329,7 +330,7 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST only")
 		return
 	}
 	if c, err := r.Cookie(s.sessionCookieName()); err == nil {
@@ -429,7 +430,7 @@ func serveLogin(w http.ResponseWriter, r *http.Request, demo bool) {
 	data = bytes.ReplaceAll(data, []byte("__VER__"), []byte(assetVersion))
 	demoHint := []byte{}
 	if demo {
-		demoHint = []byte(`<p class="login-demo-hint">演示账号：admin <span>密码：demo</span></p>`)
+		demoHint = []byte(`<p class="login-demo-hint" data-i18n="login.demoHint">Demo account: admin · Password: demo</p>`)
 	}
 	data = bytes.ReplaceAll(data, []byte("__DEMO_HINT__"), demoHint)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -469,6 +470,10 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func writeAPIError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{"ok": false, "code": code, "error": message})
+}
+
 // --- api handlers ---
 
 func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
@@ -500,16 +505,16 @@ func (s *Server) apiRoute(w http.ResponseWriter, r *http.Request) {
 			Node    string `json:"node"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+			writeAPIError(w, http.StatusBadRequest, "invalid_json", "bad json")
 			return
 		}
 		if err := s.mgr.SetRouteConfig(body.Mode, body.Country, body.Node); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeAPIError(w, http.StatusBadRequest, "route_invalid", err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET or PUT"})
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or PUT")
 	}
 }
 
@@ -546,7 +551,7 @@ func (s *Server) apiLogStream(w http.ResponseWriter, r *http.Request) {
 	case s.sseLimit <- struct{}{}:
 		defer func() { <-s.sseLimit }()
 	default:
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many log streams"})
+		writeAPIError(w, http.StatusTooManyRequests, "too_many_log_streams", "too many log streams")
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -589,7 +594,7 @@ func (s *Server) apiLogStream(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiUpdateNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST only")
 		return
 	}
 	s.mgr.TriggerFetch()
@@ -603,30 +608,30 @@ func (s *Server) apiTestBlacklist(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		if err := s.mgr.StartBlacklistTest(); err != nil {
 			if errors.Is(err, manager.ErrBlacklistTestRunning) {
-				writeJSON(w, http.StatusConflict, map[string]string{"error": "黑名单验证正在进行"})
+				writeAPIError(w, http.StatusConflict, "blacklist_test_running", "黑名单验证正在进行")
 				return
 			}
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET or POST"})
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or POST")
 	}
 }
 
 func (s *Server) apiRestoreAvailableBlacklist(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST only")
 		return
 	}
 	restored, err := s.mgr.RestoreAvailableBlacklist()
 	if err != nil {
 		if errors.Is(err, manager.ErrBlacklistTestRunning) {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "黑名单验证正在进行"})
+			writeAPIError(w, http.StatusConflict, "blacklist_test_running", "黑名单验证正在进行")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restored": restored})

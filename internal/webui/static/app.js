@@ -5,14 +5,6 @@ const $ = (id) => document.getElementById(id);
 
 /* ---- state pill ---- */
 /* ---- state pill ---- */
-const STATE_LABEL = {
-  idle: "IDLE",
-  fetching: "FETCHING",
-  connecting: "CONNECTING",
-  connected: "CONNECTED",
-  drifting: "DRIFTING",
-};
-
 function setPill(state) {
   const pill = $("status-pill");
   pill.className = "pill";
@@ -21,22 +13,27 @@ function setPill(state) {
   else if (state === "connecting" || state === "fetching") cls = "pill-connecting";
   else if (state === "drifting") cls = "pill-drifting";
   pill.classList.add(cls);
-  $("status-text").textContent = STATE_LABEL[state] || state.toUpperCase();
+  const knownStates = ["idle", "fetching", "connecting", "connected", "drifting"];
+  const label = knownStates.includes(state) ? window.ConduitI18n.t(`status.${state}`) : state.toUpperCase();
+  $("status-text").textContent = label;
+  pill.setAttribute("aria-label", label);
 }
 
 /* ---- uptime ---- */
 let bootTs = Date.now() / 1000;
+let lastState = null;
 
 function fmtUptime(sec) {
   const s = Math.max(0, Math.floor(sec));
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m ${s % 60}s`;
+  if (d > 0) return window.ConduitI18n.t("uptime.days", { days: d, hours: h });
+  if (h > 0) return window.ConduitI18n.t("uptime.hours", { hours: h, minutes: m });
+  return window.ConduitI18n.t("uptime.minutes", { minutes: m, seconds: s % 60 });
 }
 
 /* ---- state render ---- */
 function renderState(snap) {
+  lastState = snap;
   setPill(snap.state);
   bootTs = Date.now() / 1000 - snap.uptime_sec;
 
@@ -53,7 +50,7 @@ function renderState(snap) {
 
   $("c-proxy").textContent = snap.proxy_port || "7928";
   $("c-uptime").textContent = fmtUptime(snap.uptime_sec);
-  $("c-blacklist").textContent = `${snap.blacklist_count || 0} 个节点已拉黑`;
+  $("c-blacklist").textContent = window.ConduitI18n.t("blacklist.count", { count: snap.blacklist_count || 0 });
 }
 
 /* ---- blacklist manager ---- */
@@ -61,18 +58,13 @@ let blacklistEntries = {};
 let blacklistTest = { running: false, total: 0, completed: 0, results: [] };
 let blacklistPollTimer = null;
 
-const BLACKLIST_TEST_LABEL = {
-  pending: "等待测试",
-  running: "验证中…",
-  passed: "可用",
-  failed: "不可用",
-  skipped: "无法验证",
-};
-
 function formatBlacklistTime(value) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : logTimeFormatter.format(date);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(window.ConduitI18n.locale(), {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).format(date);
 }
 
 function renderBlacklistManager() {
@@ -83,11 +75,11 @@ function renderBlacklistManager() {
   const completed = blacklistTest.completed || 0;
   const total = blacklistTest.total || entries.length;
   $("blacklist-progress").textContent = blacklistTest.running
-    ? `验证中 ${completed} / ${total}`
-    : (blacklistTest.started_at ? `已完成 ${completed} / ${total}` : (total ? "尚未测试" : "暂无拉黑节点"));
+    ? window.ConduitI18n.t("blacklist.progressRunning", { completed, total })
+    : (blacklistTest.started_at ? window.ConduitI18n.t("blacklist.progressDone", { completed, total }) : (total ? window.ConduitI18n.t("blacklist.notTested") : window.ConduitI18n.t("blacklist.empty")));
 
   $("btn-blacklist-test").disabled = blacklistTest.running || entries.length === 0;
-  $("btn-blacklist-test").textContent = blacklistTest.running ? "测试中…" : "批量测试";
+  $("btn-blacklist-test").textContent = window.ConduitI18n.t(blacklistTest.running ? "blacklist.testing" : "blacklist.test");
   const passed = entries.filter(([host]) => resultByHost.get(host)?.status === "passed").length;
   $("btn-blacklist-restore").disabled = blacklistTest.running || passed === 0;
 
@@ -97,7 +89,7 @@ function renderBlacklistManager() {
     const td = document.createElement("td");
     td.colSpan = 5;
     td.className = "empty-note";
-    td.textContent = "暂无拉黑节点";
+    td.textContent = window.ConduitI18n.t("blacklist.empty");
     tr.appendChild(td);
     tbody.appendChild(tr);
     return;
@@ -114,10 +106,10 @@ function renderBlacklistManager() {
     const n = nodeByHost.get(host);
     const nodeText = n
       ? `${countryRegionName(n.country_short, n.country_long) || "—"} · ${n.ip || "—"}`
-      : "当前节点池未找到";
+      : window.ConduitI18n.t("blacklist.nodeMissing");
     const result = resultByHost.get(host) || { status: "pending" };
-    const label = BLACKLIST_TEST_LABEL[result.status] || "未测试";
-    const detail = result.error ? `${label} · ${result.error}` : label;
+    const label = window.ConduitI18n.t(`blacklist.${result.status || "unknown"}`);
+    const detail = result.code ? window.ConduitI18n.errorMessage(result) : label;
     tr.appendChild(cell("host-cell", host, host));
     tr.appendChild(cell("ip-cell", nodeText, nodeText));
     tr.appendChild(cell("", entry.reason || "—", entry.reason || ""));
@@ -182,20 +174,8 @@ let sortKey = "latency";
 let sortDir = 1;
 let filterText = "";
 
-const COUNTRY_REGION = {
-  JP: "日本", KR: "韩国", US: "美国", GB: "英国", DE: "德国", FR: "法国", NL: "荷兰",
-  SG: "新加坡", CA: "加拿大", AU: "澳大利亚", HK: "中国香港", MO: "中国澳门", TW: "中国台湾", SE: "瑞典", FI: "芬兰",
-  TH: "泰国", IN: "印度", VN: "越南", MY: "马来西亚", ID: "印尼", PH: "菲律宾",
-  IT: "意大利", ES: "西班牙", CH: "瑞士", PL: "波兰", RO: "罗马尼亚", TR: "土耳其",
-  BR: "巴西", MX: "墨西哥", AR: "阿根廷", RU: "俄罗斯", UA: "乌克兰", CZ: "捷克",
-  NO: "挪威", DK: "丹麦", IE: "爱尔兰", PT: "葡萄牙", BE: "比利时", AT: "奥地利",
-  GR: "希腊", IL: "以色列", AE: "阿联酋", SA: "沙特", NZ: "新西兰", ZA: "南非",
-  EE: "爱沙尼亚", LV: "拉脱维亚", LT: "立陶宛", BG: "保加利亚", HR: "克罗地亚", HU: "匈牙利",
-};
-
 function countryRegionName(countryShort, fallback = "") {
-  const code = String(countryShort || "").trim().toUpperCase();
-  return COUNTRY_REGION[code] || fallback || code;
+  return window.ConduitI18n.regionName(countryShort, fallback);
 }
 
 function loadNodes() {
@@ -236,7 +216,7 @@ function populateRouteSelects() {
   nn.replaceChildren();
   const empty = document.createElement("option");
   empty.value = "";
-  empty.textContent = "选择节点…";
+  empty.textContent = window.ConduitI18n.t("route.selectNode");
   nn.appendChild(empty);
   rows.forEach(({ n, lat }) => {
     const latTxt = lat === Infinity ? "—" : `${lat}ms`;
@@ -276,7 +256,7 @@ function renderTable() {
     const td = document.createElement("td");
     td.colSpan = 8;
     td.className = "empty-note";
-    td.textContent = "暂无节点 — 点击右上角「更新节点」拉取";
+    td.textContent = window.ConduitI18n.t("nodes.empty");
     tr.appendChild(td);
     tbody.appendChild(tr);
     return;
@@ -316,8 +296,8 @@ function renderTable() {
     const lock = document.createElement("button");
     lock.className = "btn btn-ghost btn-lock";
     lock.dataset.host = n.host_name || "";
-    lock.title = "锁定此节点（固定 IP 模式）";
-    lock.textContent = "锁定";
+    lock.title = window.ConduitI18n.t("nodes.lockTitle");
+    lock.textContent = window.ConduitI18n.t("nodes.lock");
     action.appendChild(lock);
     tr.appendChild(action);
     tbody.appendChild(tr);
@@ -351,12 +331,6 @@ $("node-filter").addEventListener("input", (e) => {
 /* ---- route mode ---- */
 let routeCfg = { mode: "auto", country: "", node: "" };
 
-const ROUTE_LABEL = {
-  auto: "智能自动配置",
-  country: "固定国家地区",
-  fixed: "固定 IP",
-};
-
 // highlight chips matching the comma-separated routeCfg.country
 function applyChipSelection() {
   const selected = new Set((routeCfg.country || "").split(",").map((x) => x.trim()).filter(Boolean));
@@ -374,9 +348,10 @@ function renderRoute() {
   applyChipSelection();
   if (routeCfg.node) $("route-node").value = routeCfg.node;
   const detail = routeCfg.mode === "country"
-    ? " · " + (routeCfg.country ? routeCfg.country.split(",").map((c) => countryRegionName(c)).join(" / ") : "未选择")
+    ? " · " + (routeCfg.country ? routeCfg.country.split(",").map((c) => countryRegionName(c)).join(" / ") : window.ConduitI18n.t("route.none"))
     : routeCfg.mode === "fixed" ? " · " + routeCfg.node : "";
-  $("route-status").textContent = (ROUTE_LABEL[routeCfg.mode] || routeCfg.mode) + detail;
+  const label = routeCfg.mode === "auto" ? window.ConduitI18n.t("route.autoDetail") : window.ConduitI18n.t(`route.${routeCfg.mode}`);
+  $("route-status").textContent = label + detail;
 }
 
 function loadRoute() {
@@ -393,7 +368,7 @@ function setRoute(mode, country, node) {
       : (mode === "country" ? selectedCountries().join(",") : routeCfg.country),
     node: node !== undefined ? node : (mode === "fixed" ? $("route-node").value : routeCfg.node),
   };
-  $("route-msg").textContent = "应用中…";
+  $("route-msg").textContent = window.ConduitI18n.t("action.applying");
   fetch("./api/route", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -402,15 +377,15 @@ function setRoute(mode, country, node) {
     .then((r) => r.json())
     .then((res) => {
       if (res.error) {
-        $("route-msg").textContent = res.error;
+        $("route-msg").textContent = window.ConduitI18n.errorMessage(res);
         $("route-msg").classList.add("err");
       } else {
-        $("route-msg").textContent = "已应用";
+        $("route-msg").textContent = window.ConduitI18n.t("action.applied");
         $("route-msg").classList.remove("err");
         loadRoute();
       }
     })
-    .catch(() => { $("route-msg").textContent = "请求失败"; })
+    .catch(() => { $("route-msg").textContent = window.ConduitI18n.t("errors.network"); })
     .finally(() => setTimeout(() => { $("route-msg").textContent = ""; }, 2500));
 }
 
@@ -448,8 +423,8 @@ function pushLatency(ms) {
   const last = vals[vals.length - 1];
   const node = (routeCfg && routeCfg.mode === "fixed") ? "" : "";
   $("lat-summary").textContent = last != null
-    ? `当前 ${last}ms · 峰值 ${latMax}ms · 采样 ${vals.length}`
-    : (vals.length ? "等待采样…" : "暂无数据");
+    ? window.ConduitI18n.t("latency.current", { last, max: latMax, count: vals.length })
+    : (vals.length ? window.ConduitI18n.t("latency.waiting") : window.ConduitI18n.t("latency.empty"));
 }
 
 function cssVar(name) {
@@ -541,16 +516,16 @@ function drawChart() {
 
 let logLevel = "all";
 let follow = true;
+let lastLogs = [];
 
 const LEVELS = { debug: 1, info: 2, warn: 3, error: 4 };
-const logTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-});
-
 function formatLogTime(timestamp) {
   const time = new Date(timestamp);
-  return Number.isNaN(time.getTime()) ? "" : logTimeFormatter.format(time);
+  if (Number.isNaN(time.getTime())) return "";
+  return new Intl.DateTimeFormat(window.ConduitI18n.locale(), {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).format(time);
 }
 
 function appendLog(entry) {
@@ -575,13 +550,14 @@ function appendLog(entry) {
 }
 
 function renderLogs(list) {
+  lastLogs = list;
   const view = $("log-view");
   view.replaceChildren();
   const visible = list.filter((e) => logLevel === "all" || LEVELS[e.lvl || "info"] >= LEVELS[logLevel]);
   if (visible.length === 0) {
     const empty = document.createElement("span");
     empty.className = "empty-note";
-    empty.textContent = "暂无日志";
+    empty.textContent = window.ConduitI18n.t("logs.empty");
     view.appendChild(empty);
     return;
   }
@@ -624,12 +600,12 @@ $("log-view").addEventListener("scroll", () => {
 $("btn-refresh").addEventListener("click", () => {
   const btn = $("btn-refresh");
   btn.disabled = true;
-  btn.textContent = "更新中…";
+  btn.textContent = window.ConduitI18n.t("action.refreshing");
   fetch("./api/actions/update-nodes", { method: "POST" })
     .catch(() => {})
     .finally(() => {
       btn.disabled = false;
-      btn.textContent = "更新节点";
+      btn.textContent = window.ConduitI18n.t("action.refresh");
     });
 });
 
@@ -656,6 +632,20 @@ function connectStream() {
 
 /* ---- boot ---- */
 document.addEventListener("conduit-theme-change", drawChart);
+document.addEventListener("conduit-language-change", () => {
+  if (lastState) renderState(lastState);
+  renderTable();
+  populateRouteSelects();
+  renderRoute();
+  renderBlacklistManager();
+  renderLogs(lastLogs);
+  const vals = latSeries.filter((x) => x != null);
+  const last = vals[vals.length - 1];
+  $("lat-summary").textContent = last != null
+    ? window.ConduitI18n.t("latency.current", { last, max: latMax, count: vals.length })
+    : (vals.length ? window.ConduitI18n.t("latency.waiting") : window.ConduitI18n.t("latency.empty"));
+  drawChart();
+});
 window.ConduitTheme.initControls();
 fetch("./api/state")
   .then((r) => r.json())

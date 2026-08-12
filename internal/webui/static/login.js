@@ -20,10 +20,10 @@
         location.href = "./";
         return;
       }
-      err.textContent = data.error || "登录失败";
+      err.textContent = window.ConduitI18n.errorMessage(data);
       err.hidden = false;
     } catch (_) {
-      err.textContent = "网络错误，请重试";
+      err.textContent = window.ConduitI18n.t("errors.network");
       err.hidden = false;
     } finally {
       btn.disabled = false;

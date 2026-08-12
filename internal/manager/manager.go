@@ -103,6 +103,7 @@ var ErrBlacklistTestRunning = errors.New("blacklist verification is already runn
 type BlacklistTestResult struct {
 	Host     string `json:"host"`
 	Status   string `json:"status"`
+	Code     string `json:"code,omitempty"`
 	Error    string `json:"error,omitempty"`
 	TestedAt string `json:"tested_at,omitempty"`
 }
@@ -559,9 +560,11 @@ func (m *Manager) runBlacklistTest(ctx context.Context, hosts []string, byHost m
 		n, ok := byHost[host]
 		if !ok {
 			result.Status = BlacklistTestSkipped
+			result.Code = "node_not_found"
 			result.Error = "当前节点池未找到，无法验证"
 		} else if err := m.blacklistVerifier(ctx, n); err != nil {
 			result.Status = BlacklistTestFailed
+			result.Code = "verification_failed"
 			result.Error = err.Error()
 			logx.Warn("blacklist verification failed", "host", host, "err", err)
 		} else {

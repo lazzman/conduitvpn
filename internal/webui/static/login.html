@@ -1,59 +1,43 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>ConduitVPN · 登录</title>
+<title data-page-title="page.login">ConduitVPN · Sign in</title>
 <link rel="icon" href="./favicon.ico?v=__VER__" sizes="any">
 <link rel="icon" type="image/png" href="./favicon-16x16.png?v=__VER__" sizes="16x16">
 <link rel="icon" type="image/png" href="./favicon-32x32.png?v=__VER__" sizes="32x32">
 <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=__VER__" sizes="180x180">
 <link rel="manifest" href="./site.webmanifest?v=__VER__">
+<script src="./i18n.js?v=__VER__"></script>
 <script src="./theme.js?v=__VER__"></script>
 <link rel="stylesheet" href="./styles.css?v=__VER__">
 </head>
 <body class="login-body">
-  <div class="login-theme-control theme-menu-wrap" data-theme-control>
-    <button class="btn btn-ghost btn-icon" type="button" data-theme-button title="主题：跟随系统" aria-label="打开主题菜单" aria-haspopup="menu" aria-expanded="false">
-      <svg data-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l-1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-      <svg data-theme-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      <svg data-theme-icon="system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-    </button>
-    <div class="theme-menu" data-theme-menu role="menu" hidden>
-      <button class="theme-option" type="button" role="menuitemradio" data-theme="system" title="跟随系统" aria-label="跟随系统" aria-checked="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-      </button>
-      <button class="theme-option" type="button" role="menuitemradio" data-theme="dark" title="深色" aria-label="深色" aria-checked="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      </button>
-      <button class="theme-option" type="button" role="menuitemradio" data-theme="light" title="浅色" aria-label="浅色" aria-checked="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l-1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-      </button>
-    </div>
-  </div>
-  <div class="login-card">
-    <div class="brand login-brand">
-      <div class="brand-mark" aria-hidden="true"><img src="./brand-mark.png?v=__VER__" alt=""></div>
-      <div class="brand-text">
-        <span class="brand-name">CONDUITVPN</span>
-        <span class="brand-sub">VPN GATEWAY</span>
+  <div class="login-controls">
+    <div class="language-menu-wrap" data-language-control>
+      <button class="btn btn-ghost btn-icon language-button" type="button" data-language-button title="Select language" aria-label="Open language menu" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></button>
+      <div class="language-menu" data-language-menu role="menu" hidden>
+        <button class="language-option" type="button" role="menuitemradio" data-language="zh-CN" aria-checked="false">简体中文</button>
+        <button class="language-option" type="button" role="menuitemradio" data-language="zh-TW" aria-checked="false">繁體中文</button>
+        <button class="language-option" type="button" role="menuitemradio" data-language="en" aria-checked="true">English</button>
       </div>
     </div>
-    <h1 class="login-title">管理后台</h1>
-    <p class="login-sub">请输入您的管理账号和安全密码以继续</p>
-    __DEMO_HINT__
-    <form id="login_form" class="login-form">
-      <label>用户名
-        <input class="input input-block" name="username" required autocomplete="username" autofocus>
-      </label>
-      <label>密码
-        <input class="input input-block" type="password" name="password" required autocomplete="current-password">
-      </label>
-      <button type="submit" class="btn btn-block" id="submit_btn">登 录</button>
-      <p id="login_err" class="login-err" hidden></p>
-    </form>
+    <div class="theme-menu-wrap" data-theme-control>
+      <button class="btn btn-ghost btn-icon" type="button" data-theme-button title="Theme: System" aria-label="Open theme menu" data-i18n-aria-label="theme.menu" aria-haspopup="menu" aria-expanded="false">
+        <svg data-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l-1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg data-theme-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg data-theme-icon="system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </button>
+      <div class="theme-menu" data-theme-menu role="menu" hidden>
+        <button class="theme-option" type="button" role="menuitemradio" data-theme="system" data-i18n-title="theme.system" data-i18n-aria-label="theme.system" aria-checked="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></button>
+        <button class="theme-option" type="button" role="menuitemradio" data-theme="dark" data-i18n-title="theme.dark" data-i18n-aria-label="theme.dark" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        <button class="theme-option" type="button" role="menuitemradio" data-theme="light" data-i18n-title="theme.light" data-i18n-aria-label="theme.light" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l-1.41 1.41M17.66 6.34l1.41-1.41"/></svg></button>
+      </div>
+    </div>
   </div>
+  <div class="login-card"><div class="brand login-brand"><div class="brand-mark" aria-hidden="true"><img src="./brand-mark.png?v=__VER__" alt=""></div><div class="brand-text"><span class="brand-name">CONDUITVPN</span><span class="brand-sub">VPN GATEWAY</span></div></div><h1 class="login-title" data-i18n="login.title">Management console</h1><p class="login-sub" data-i18n="login.subtitle">Enter your administrator credentials to continue</p>__DEMO_HINT__<form id="login_form" class="login-form"><label><span data-i18n="login.username">Username</span><input class="input input-block" name="username" required autocomplete="username" autofocus></label><label><span data-i18n="login.password">Password</span><input class="input input-block" type="password" name="password" required autocomplete="current-password"></label><button type="submit" class="btn btn-block" id="submit_btn" data-i18n="login.submit">Sign in</button><p id="login_err" class="login-err" hidden></p></form></div>
 <script src="./login.js?v=__VER__"></script>
 </body>
 </html>

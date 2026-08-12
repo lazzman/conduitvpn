@@ -18,6 +18,7 @@ func TestStaticAssetVersionStable(t *testing.T) {
 		"static/index.html":                 &fstest.MapFile{Data: []byte("index")},
 		"static/login.html":                 &fstest.MapFile{Data: []byte("login")},
 		"static/styles.css":                 &fstest.MapFile{Data: []byte("styles")},
+		"static/i18n.js":                    &fstest.MapFile{Data: []byte("i18n script")},
 		"static/theme.js":                   &fstest.MapFile{Data: []byte("theme script")},
 		"static/app.js":                     &fstest.MapFile{Data: []byte("app")},
 		"static/login.js":                   &fstest.MapFile{Data: []byte("login script")},
@@ -46,6 +47,7 @@ func TestStaticAssetVersionChangesWithContent(t *testing.T) {
 		"static/index.html":                 &fstest.MapFile{Data: []byte("index")},
 		"static/login.html":                 &fstest.MapFile{Data: []byte("login")},
 		"static/styles.css":                 &fstest.MapFile{Data: []byte("styles")},
+		"static/i18n.js":                    &fstest.MapFile{Data: []byte("i18n script")},
 		"static/theme.js":                   &fstest.MapFile{Data: []byte("theme script")},
 		"static/app.js":                     &fstest.MapFile{Data: []byte("app")},
 		"static/login.js":                   &fstest.MapFile{Data: []byte("login script")},
@@ -105,33 +107,31 @@ func TestEmbeddedBrandAssets(t *testing.T) {
 	}
 }
 
-func TestEmbeddedRegionLabels(t *testing.T) {
-	index, err := staticFS.ReadFile("static/index.html")
+func TestEmbeddedI18nUI(t *testing.T) {
+	for _, name := range []string{"static/index.html", "static/login.html"} {
+		page, err := staticFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{`src="./i18n.js?v=__VER__"`, "data-language-control", "data-language-menu", "data-i18n"} {
+			if !strings.Contains(string(page), want) {
+				t.Errorf("%s is missing %q", name, want)
+			}
+		}
+	}
+	data, err := staticFS.ReadFile("static/i18n.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(index), "固定国家地区") || !strings.Contains(string(index), `<th data-sort="country">国家地区</th>`) {
-		t.Fatal("index is missing country-region labels")
-	}
-
-	app, err := staticFS.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`HK: "中国香港"`,
-		`MO: "中国澳门"`,
-		`TW: "中国台湾"`,
-		`country: "固定国家地区"`,
-	} {
-		if !strings.Contains(string(app), want) {
-			t.Errorf("app.js is missing %q", want)
+	for _, want := range []string{"zh-CN", "zh-TW", "navigator.languages", "Intl.DisplayNames", "conduit-language"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("i18n.js is missing %q", want)
 		}
 	}
 }
 
 func TestEmbeddedScriptsDoNotUseHTMLInjection(t *testing.T) {
-	for _, name := range []string{"static/theme.js", "static/app.js", "static/login.js"} {
+	for _, name := range []string{"static/i18n.js", "static/theme.js", "static/app.js", "static/login.js"} {
 		data, err := staticFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -218,13 +218,13 @@ func TestDemoLoginShowsCredentialsOnlyInDemo(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	demo := httptest.NewRecorder()
 	serveLogin(demo, request, true)
-	if !strings.Contains(demo.Body.String(), "演示账号：admin") {
+	if !strings.Contains(demo.Body.String(), "Demo account: admin") {
 		t.Fatal("demo login is missing credential hint")
 	}
 
 	production := httptest.NewRecorder()
 	serveLogin(production, request, false)
-	if strings.Contains(production.Body.String(), "演示账号：admin") {
+	if strings.Contains(production.Body.String(), "Demo account: admin") {
 		t.Fatal("production login leaked demo credential hint")
 	}
 }
@@ -248,6 +248,21 @@ func TestLoginUsesPrivateHashedCredentialsAndStrictCookie(t *testing.T) {
 	cookies := w.Result().Cookies()
 	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode || cookies[0].MaxAge != int(sessionTTL.Seconds()) {
 		t.Fatalf("unexpected session cookie: %+v", cookies)
+	}
+}
+
+func TestAPIErrorsHaveStableCodes(t *testing.T) {
+	s := testServer(t, false)
+	w := httptest.NewRecorder()
+	s.apiLogin(w, httptest.NewRequest(http.MethodGet, "/api/login", nil))
+	if w.Code != http.StatusMethodNotAllowed || !strings.Contains(w.Body.String(), `"code":"method_not_allowed"`) {
+		t.Fatalf("login method error = %d %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	s.apiRoute(w, httptest.NewRequest(http.MethodPut, "/api/route", bytes.NewBufferString(`{"mode":"invalid"}`)))
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"route_invalid"`) {
+		t.Fatalf("route error = %d %s", w.Code, w.Body.String())
 	}
 }
 
