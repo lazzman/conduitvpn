@@ -15,6 +15,47 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  changes:
+    name: detect image-affecting changes
+    runs-on: ubuntu-latest
+    outputs:
+      build_image: ${{ steps.filter.outputs.build_image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$REF_TYPE" = "tag" ]; then
+            echo "build_image=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed_files="$(git diff --name-only "$BEFORE" "$SHA")"
+          if [ -z "$changed_files" ]; then
+            echo "build_image=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          while IFS= read -r file; do
+            case "$file" in
+              *.md|AGENTS.md|docs/**|.env.example|docker-compose.yml) ;;
+              *)
+                echo "build_image=true" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+          done <<EOF
+          $changed_files
+          EOF
+
+          echo "build_image=false" >> "$GITHUB_OUTPUT"
+
   test:
     name: vet + test
     runs-on: ubuntu-latest
@@ -45,7 +86,8 @@ jobs:
 
   image:
     name: build & push image (amd64/arm64)
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.build_image == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
