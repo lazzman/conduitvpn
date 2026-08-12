@@ -190,7 +190,7 @@ const COUNTRY_REGION = {
   BR: "巴西", MX: "墨西哥", AR: "阿根廷", RU: "俄罗斯", UA: "乌克兰", CZ: "捷克",
   NO: "挪威", DK: "丹麦", IE: "爱尔兰", PT: "葡萄牙", BE: "比利时", AT: "奥地利",
   GR: "希腊", IL: "以色列", AE: "阿联酋", SA: "沙特", NZ: "新西兰", ZA: "南非",
-  EE: "爱沙尼亚", LV: "拉脱维亚", LT: "立陶宛", BG: "保加利亚", HU: "匈牙利",
+  EE: "爱沙尼亚", LV: "拉脱维亚", LT: "立陶宛", BG: "保加利亚", HR: "克罗地亚", HU: "匈牙利",
 };
 
 function countryRegionName(countryShort, fallback = "") {
