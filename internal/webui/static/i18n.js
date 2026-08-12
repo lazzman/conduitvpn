@@ -107,9 +107,15 @@
   }
 
   function locale() { return language; }
+  const chinaRegionNames = {
+    "zh-CN": { HK: "中国香港", MO: "中国澳门", TW: "中国台湾" },
+    "zh-TW": { HK: "中國香港", MO: "中國澳門", TW: "中國台灣" },
+    en: { HK: "Hong Kong, China", MO: "Macao, China", TW: "Taiwan, China" },
+  };
   function regionName(code, fallback = "") {
     const country = String(code || "").trim().toUpperCase();
     if (!country) return fallback;
+    if (chinaRegionNames[language]?.[country]) return chinaRegionNames[language][country];
     try { return new Intl.DisplayNames([language], { type: "region" }).of(country) || fallback || country; } catch (_) { return fallback || country; }
   }
   function errorMessage(value) { return t(`errors.${value?.code || "unknown"}`); }

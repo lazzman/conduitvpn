@@ -123,7 +123,12 @@ func TestEmbeddedI18nUI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"zh-CN", "zh-TW", "navigator.languages", "Intl.DisplayNames", "conduit-language"} {
+	for _, want := range []string{
+		"zh-CN", "zh-TW", "navigator.languages", "Intl.DisplayNames", "conduit-language",
+		"中国香港", "中国澳门", "中国台湾",
+		"中國香港", "中國澳門", "中國台灣",
+		"Hong Kong, China", "Macao, China", "Taiwan, China",
+	} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("i18n.js is missing %q", want)
 		}
