@@ -584,6 +584,7 @@ td.lat-dead { color: var(--text-3); }
 .dialog {
   width: min(980px, calc(100vw - 28px));
   max-height: min(720px, calc(100dvh - 28px));
+  margin: auto;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border-strong);
