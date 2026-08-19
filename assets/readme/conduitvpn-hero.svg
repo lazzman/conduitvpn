@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">ConduitVPN managed VPNGate proxy gateway</title>
+  <desc id="desc">VPNGate nodes feed a managed tunnel, which exposes HTTP, SOCKS5, and optional hysteria2 ingress while health checks support automatic failover.</desc>
+  <defs>
+    <linearGradient id="flow" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#0066ff" stop-opacity=".25"/>
+      <stop offset=".52" stop-color="#0066ff"/>
+      <stop offset="1" stop-color="#00aee6"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#0066ff"/>
+    </marker>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="360" rx="20" fill="#f6f6f8"/>
+  <path d="M0 66H1200M0 294H1200" stroke="#e5e5ea"/>
+  <g id="title-block" transform="translate(64 74)">
+    <text class="mono" x="0" y="0" fill="#0066ff" font-size="18" font-weight="700" letter-spacing="2.2">VPNGATE PROXY GATEWAY</text>
+    <text class="sans" x="0" y="66" fill="#18181b" font-size="58" font-weight="750" letter-spacing="0">ConduitVPN</text>
+    <text class="sans" x="0" y="108" fill="#52525b" font-size="24">Managed OpenVPN routing with monitored failover.</text>
+    <text class="sans" x="0" y="140" fill="#52525b" font-size="24">HTTP + SOCKS5 + optional hysteria2.</text>
+    <g transform="translate(0 180)">
+      <rect width="160" height="40" rx="8" fill="#fff" stroke="#d4d4db"/>
+      <circle cx="22" cy="20" r="6" fill="#0066ff"/>
+      <text class="mono" x="40" y="26" fill="#52525b" font-size="18" font-weight="600">GO 1.22</text>
+      <rect x="174" width="226" height="40" rx="8" fill="#fff" stroke="#d4d4db"/>
+      <text class="mono" x="195" y="26" fill="#52525b" font-size="18" font-weight="600">STANDARD LIBRARY</text>
+    </g>
+  </g>
+
+  <g id="gateway-flow" transform="translate(674 54)">
+    <rect width="462" height="250" rx="16" fill="#fff" stroke="#d4d4db"/>
+    <text class="mono" x="28" y="36" fill="#86868f" font-size="18" font-weight="700" letter-spacing="1.6">SUPERVISED DATA PATH</text>
+
+    <g transform="translate(28 64)">
+      <rect width="114" height="132" rx="10" fill="#f1f1f4" stroke="#d4d4db"/>
+      <text class="mono" x="17" y="28" fill="#52525b" font-size="18" font-weight="700">VPNGATE</text>
+      <circle cx="28" cy="58" r="8" fill="#0066ff"/>
+      <circle cx="28" cy="84" r="8" fill="#00aee6"/>
+      <circle cx="28" cy="110" r="8" fill="#5c5c68"/>
+      <text class="mono" x="44" y="64" fill="#52525b" font-size="18">nodes</text>
+      <text class="mono" x="44" y="90" fill="#52525b" font-size="18">test</text>
+      <text class="mono" x="44" y="116" fill="#52525b" font-size="18">rank</text>
+    </g>
+
+    <path d="M154 130H210" fill="none" stroke="url(#flow)" stroke-width="3" marker-end="url(#arrow)"/>
+    <text class="mono" x="158" y="112" fill="#86868f" font-size="18">select</text>
+
+    <g transform="translate(220 86)">
+      <rect width="112" height="88" rx="10" fill="#eaf2ff" stroke="#0066ff" stroke-width="1.5"/>
+      <text class="mono" x="20" y="34" fill="#0052cc" font-size="18" font-weight="700">TUNNEL</text>
+      <text class="sans" x="20" y="62" fill="#52525b" font-size="20">OpenVPN</text>
+    </g>
+
+    <path d="M344 130H388" fill="none" stroke="url(#flow)" stroke-width="3" marker-end="url(#arrow)"/>
+    <g transform="translate(396 64)">
+      <rect width="38" height="132" rx="10" fill="#f1f1f4" stroke="#d4d4db"/>
+      <circle cx="19" cy="33" r="7" fill="#0066ff"/>
+      <circle cx="19" cy="66" r="7" fill="#00aee6"/>
+      <circle cx="19" cy="99" r="7" fill="#5c5c68"/>
+    </g>
+    <text class="mono" x="350" y="220" fill="#52525b" font-size="18" font-weight="700">PROXY INGRESS</text>
+  </g>
+</svg>
