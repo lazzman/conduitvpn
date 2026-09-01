@@ -11,6 +11,7 @@ cmd/conduitvpn/main.go          入口：解析 flag、校验配置、装配服�
 internal/
   config/                       环境变量 → 类型化 Config；Validate 在开端口之前
   node/                         节点模型与排序，不含 IO
+  purity/                       ipinfo 纯净度查询与机房判定
   vpngate/                      VPNGate CSV 拉取、profile 校验、上游代理拨号
   benchmark/                    并发 TCP 测速
   upstream/                     sing-box URI/订阅解析与子进程 Runner
@@ -44,6 +45,7 @@ internal/webui/static/          原生 HTML/JS/CSS（规范见 frontend/）
 | `egress` | 拨号策略与 host 路由 | OpenVPN 握手解析 |
 | `proxy` | 入站协议与转发 | 决定何时隧道就绪（问 `egress.Controller`） |
 | `node` | 纯数据与排序 | 网络、文件 |
+| `purity` | ipinfo 查询、机房判定、纯净度记录 | 选路决策、HTTP 编码 |
 
 新增能力时优先扩展现有包。只有当所有权无法归入上表时才新建 `internal/<pkg>`。
 

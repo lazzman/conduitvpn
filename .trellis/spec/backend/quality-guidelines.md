@@ -43,7 +43,7 @@ func sanitizeNode(n *node.Node) *node.Node {
 }
 ```
 
-`apiState` 与 SSE `state` 事件已经走 `sanitizeNode`。**当前缺口**：`GET /api/nodes` 直接 `writeJSON` 了 `store.LoadNodes()`，持久化文件里仍有 `config_text`。新接口不要复制这个缺口；改节点 API 时应一并脱敏。不要在日志或错误信息里打印 profile。
+`apiState`、SSE `state` 与 `GET /api/nodes` 都走 `sanitizeNode`（节点列表再合并 `purity`）。磁盘上的 `nodes.json` 仍保留 `config_text` 以便重连。不要把 profile 写进 API、日志或错误信息。
 
 VPNGate 配置在解析时就必须过 `ValidateOpenVPNProfile`：禁止 script/plugin/管理口，且 `remote` 必须等于该行广告的公网 IPv4。见 `internal/vpngate/parse.go` 与 `profile_test.go`。
 

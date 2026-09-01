@@ -20,6 +20,7 @@ import (
 	"conduitvpn/internal/health"
 	"conduitvpn/internal/logx"
 	"conduitvpn/internal/node"
+	"conduitvpn/internal/purity"
 	"conduitvpn/internal/state"
 	"conduitvpn/internal/tunnel"
 	"conduitvpn/internal/upstream"
@@ -85,6 +86,10 @@ type Manager struct {
 	refreshConsumed  uint64
 	demo             bool
 	demoRefresh      uint32
+
+	purityLookup  func(context.Context, string) (purity.Record, error)
+	purityMu      sync.Mutex
+	purityPending atomic.Int32
 }
 
 // errModeChanged aborts the current connect/monitor cycle so the loop
@@ -102,6 +107,7 @@ type Snapshot struct {
 	RouteMode      string     `json:"route_mode"`
 	RouteCountry   string     `json:"route_country,omitempty"`
 	RouteNode      string     `json:"route_node,omitempty"`
+	PurityPending  int        `json:"purity_pending"`
 }
 
 const (
@@ -152,6 +158,7 @@ func New(cfg config.Config) *Manager {
 		routeMode:    cfg.RouteMode,
 		routeCountry: cfg.RouteCountry,
 		routeNode:    cfg.RouteNode,
+		purityLookup: purity.NewClient(12 * time.Second).Lookup,
 	}
 	m.mirrorValidator = vpngate.ValidateMirrorOrigin
 	m.loadVPNGateSources()
@@ -192,6 +199,7 @@ func (m *Manager) Snapshot() Snapshot {
 	m.mu.Unlock()
 	mode, country, node := m.routeConfig()
 	s.RouteMode, s.RouteCountry, s.RouteNode = mode, country, node
+	s.PurityPending = int(m.purityPending.Load())
 	return s
 }
 
@@ -211,6 +219,7 @@ func (m *Manager) refreshDemoNodes() {
 		logx.Warn("save demo nodes failed", "err", err)
 	}
 	m.setCandidatePool(nodes)
+	m.seedDemoPurity(nodes)
 	m.updateDemoCurrent(nodes)
 	logx.Info("demo nodes refreshed", "count", len(nodes))
 }
@@ -854,7 +863,7 @@ func (m *Manager) selectCandidates(nodes []*node.Node) []*node.Node {
 				out = append(out, n)
 			}
 		}
-		return out
+		return m.preferNonHosting(out)
 	case "fixed":
 		for _, n := range nodes {
 			if n != nil && (n.HostName == fixed || n.IP == fixed) {
@@ -869,7 +878,7 @@ func (m *Manager) selectCandidates(nodes []*node.Node) []*node.Node {
 				out = append(out, n)
 			}
 		}
-		return out
+		return m.preferNonHosting(out)
 	}
 }
 

@@ -397,15 +397,125 @@ let nodes = [];
 let sortKey = "latency";
 let sortDir = 1;
 let filterText = "";
+let filterCountry = "";
+let filterSource = "";
+let filterAttr = "";
 
-function countryRegionName(countryShort, fallback = "") {
-  return window.ConduitI18n.regionName(countryShort, fallback);
+function countryRegionName(countryShort, fallback) {
+  return window.ConduitI18n.regionName(countryShort, fallback || "");
+}
+
+function purityOf(n) {
+  return n && n.purity ? n.purity : null;
+}
+
+function displayCountryCode(n) {
+  const p = purityOf(n);
+  return String((p && p.country) || n.country_short || "").toUpperCase();
+}
+
+function sourceKey(n) {
+  const p = purityOf(n);
+  return String((p && p.source) || "").toLowerCase();
+}
+
+function attrList(n) {
+  const p = purityOf(n);
+  return Array.isArray(p && p.attrs) ? p.attrs : [];
+}
+
+function sourceLabel(source) {
+  const key = {
+    isp: "nodes.sourceIsp",
+    hosting: "nodes.sourceHosting",
+    business: "nodes.sourceBusiness",
+    education: "nodes.sourceEducation",
+  }[source];
+  return key ? window.ConduitI18n.t(key) : (source || "—");
+}
+
+function attrLabel(attr) {
+  const key = {
+    vpn: "nodes.attrVpn",
+    proxy: "nodes.attrProxy",
+    tor: "nodes.attrTor",
+    relay: "nodes.attrRelay",
+    hosting: "nodes.attrHosting",
+    mobile: "nodes.attrMobile",
+    anycast: "nodes.attrAnycast",
+    anonymous: "nodes.attrAnonymous",
+    satellite: "nodes.attrSatellite",
+  }[attr];
+  return key ? window.ConduitI18n.t(key) : attr;
+}
+
+function fillSelect(id, options, selected, allLabel) {
+  const el = $(id);
+  const previous = selected;
+  el.replaceChildren();
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = allLabel;
+  el.appendChild(all);
+  options.forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.value;
+    option.textContent = opt.label;
+    el.appendChild(option);
+  });
+  el.value = options.some((opt) => opt.value === previous) ? previous : "";
+  return el.value;
+}
+
+function populateNodeFilters() {
+  const countries = {};
+  const sources = {};
+  const attrs = {};
+  nodes.forEach((n) => {
+    const cc = displayCountryCode(n);
+    if (cc) countries[cc] = countryRegionName(cc, n.country_long);
+    const src = sourceKey(n);
+    if (src) sources[src] = sourceLabel(src);
+    attrList(n).forEach((a) => { attrs[a] = attrLabel(a); });
+  });
+  const allLabel = window.ConduitI18n.t("nodes.filterAll");
+  filterCountry = fillSelect(
+    "filter-country",
+    Object.keys(countries).sort().map((code) => ({ value: code, label: code + " · " + countries[code] })),
+    filterCountry,
+    allLabel
+  );
+  filterSource = fillSelect(
+    "filter-source",
+    Object.keys(sources).sort().map((value) => ({ value: value, label: sources[value] })),
+    filterSource,
+    allLabel
+  );
+  filterAttr = fillSelect(
+    "filter-attr",
+    Object.keys(attrs).sort().map((value) => ({ value: value, label: attrs[value] })),
+    filterAttr,
+    allLabel
+  );
+}
+
+function sortValue(n) {
+  const p = purityOf(n);
+  if (sortKey === "latency") return n.tested && n.latency_ms > 0 ? n.latency_ms : Infinity;
+  if (sortKey === "country") return displayCountryCode(n);
+  if (sortKey === "source") return sourceKey(n);
+  if (sortKey === "attrs") return attrList(n).join(",");
+  if (sortKey === "postal") return (p && (p.postal || p.city)) || "";
+  if (sortKey === "host") return n.host_name || "";
+  if (sortKey === "ip") return n.ip || "";
+  if (sortKey === "proto") return n.remote_proto || "";
+  return n[sortKey] ?? "";
 }
 
 function loadNodes() {
   fetch("./api/nodes")
     .then((r) => r.json())
-    .then((list) => { nodes = list; renderTable(); populateRouteSelects(); })
+    .then((list) => { nodes = list; populateNodeFilters(); renderTable(); populateRouteSelects(); })
     .catch(() => {});
 }
 
@@ -456,17 +566,23 @@ function populateRouteSelects() {
 function renderTable() {
   const q = filterText.toLowerCase();
   let rows = nodes.filter((n) => {
+    const p = purityOf(n);
+    const cc = displayCountryCode(n);
+    if (filterCountry && cc !== filterCountry) return false;
+    if (filterSource && sourceKey(n) !== filterSource) return false;
+    if (filterAttr && attrList(n).indexOf(filterAttr) < 0) return false;
     if (!q) return true;
-    return [n.host_name, n.ip, n.country_short, n.country_long, n.remote_proto]
-      .join(" ").toLowerCase().includes(q);
+    const hay = [
+      n.host_name, n.ip, n.country_short, n.country_long, n.remote_proto, cc,
+      sourceKey(n), sourceLabel(sourceKey(n)), attrList(n).join(" "),
+      p && p.postal, p && p.city, p && p.org,
+    ].join(" ").toLowerCase();
+    return hay.includes(q);
   });
 
   rows.sort((a, b) => {
-    let va = a[sortKey] ?? "", vb = b[sortKey] ?? "";
-    if (sortKey === "latency") {
-      va = a.tested && a.latency_ms > 0 ? a.latency_ms : Infinity;
-      vb = b.tested && b.latency_ms > 0 ? b.latency_ms : Infinity;
-    }
+    const va = sortValue(a);
+    const vb = sortValue(b);
     if (typeof va === "number" && typeof vb === "number") return (va - vb) * sortDir;
     return String(va).localeCompare(String(vb)) * sortDir;
   });
@@ -478,7 +594,7 @@ function renderTable() {
   if (rows.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 8;
+    td.colSpan = 11;
     td.className = "empty-note";
     td.textContent = window.ConduitI18n.t("nodes.empty");
     tr.appendChild(td);
@@ -487,22 +603,25 @@ function renderTable() {
   }
 
   for (const n of rows) {
-    const lat = n.tested && n.latency_ms > 0 ? `${n.latency_ms}ms` : "—";
+    const lat = n.tested && n.latency_ms > 0 ? n.latency_ms + "ms" : "—";
     const latCls = n.tested && n.latency_ms > 0
       ? (n.latency_ms < 200 ? "lat-ok" : n.latency_ms < 500 ? "lat-mid" : "lat-dead")
       : "lat-dead";
-    const countryCode = String(n.country_short || "??").toUpperCase();
-    const country = countryRegionName(n.country_short, n.country_long);
+    const p = purityOf(n);
+    const countryCode = displayCountryCode(n) || "??";
+    const country = countryRegionName(countryCode, n.country_long);
+    const vgCode = String(n.country_short || "").toUpperCase();
+    const countryTitle = vgCode && vgCode !== countryCode ? country + " · VPNGate " + vgCode : country;
     const tr = document.createElement("tr");
-    const cell = (className, value, title = "") => {
+    const cell = (className, value, title) => {
       const td = document.createElement("td");
       td.className = className;
       td.textContent = value;
       if (title) td.title = title;
       return td;
     };
-    tr.appendChild(cell(`num ${latCls}`, lat));
-    const countryCell = cell("country-cell", "", country);
+    tr.appendChild(cell("num " + latCls, lat));
+    const countryCell = cell("country-cell", "", countryTitle);
     const code = document.createElement("span");
     code.className = "country-code";
     code.textContent = countryCode;
@@ -511,6 +630,38 @@ function renderTable() {
     countryName.textContent = country;
     countryCell.append(code, countryName);
     tr.appendChild(countryCell);
+
+    const src = sourceKey(n);
+    const sourceCell = cell("source-cell", "", src);
+    if (!p || p.status === "pending") {
+      sourceCell.textContent = window.ConduitI18n.t("nodes.purityPending");
+      sourceCell.classList.add("purity-pending");
+    } else if (p.status === "error") {
+      sourceCell.textContent = window.ConduitI18n.t("nodes.purityError");
+      sourceCell.classList.add("purity-error");
+    } else {
+      sourceCell.textContent = sourceLabel(src);
+      if (p.hosting || src === "hosting") sourceCell.classList.add("source-hosting");
+      else if (src === "isp") sourceCell.classList.add("source-isp");
+    }
+    tr.appendChild(sourceCell);
+
+    const attrsCell = cell("attrs-cell", "");
+    const labels = attrList(n);
+    if (labels.length === 0) {
+      attrsCell.textContent = "—";
+    } else {
+      labels.forEach((a) => {
+        const tag = document.createElement("span");
+        tag.className = "attr-tag" + (a === "hosting" || a === "vpn" ? " attr-" + a : "");
+        tag.textContent = attrLabel(a);
+        attrsCell.appendChild(tag);
+      });
+    }
+    tr.appendChild(attrsCell);
+
+    const postal = (p && (p.postal || p.city)) || "—";
+    tr.appendChild(cell("postal-cell", postal, p && p.city ? [p.city, p.region].filter(Boolean).join(", ") : postal));
     tr.appendChild(cell("host-cell", n.host_name || "", n.host_name || ""));
     tr.appendChild(cell("ip-cell", n.ip || "", n.ip || ""));
     tr.appendChild(cell("proto-cell", n.remote_proto || "udp"));
@@ -527,7 +678,6 @@ function renderTable() {
     tbody.appendChild(tr);
   }
 
-  // lock button: switch to fixed mode targeting this node
   tbody.querySelectorAll(".btn-lock").forEach((btn) => {
     btn.addEventListener("click", () => setRoute("fixed", "", btn.dataset.host));
   });
@@ -540,7 +690,8 @@ document.querySelectorAll("#node-table thead th").forEach((th) => {
     if (sortKey === key) sortDir = -sortDir;
     else { sortKey = key; sortDir = 1; }
     document.querySelectorAll("#node-table thead th").forEach((t) => {
-      t.querySelector(".sort-hint").textContent = t === th ? (sortDir > 0 ? "↑" : "↓") : "";
+      const hint = t.querySelector(".sort-hint");
+      if (hint) hint.textContent = t === th ? (sortDir > 0 ? "↑" : "↓") : "";
     });
     renderTable();
   });
@@ -549,6 +700,14 @@ document.querySelectorAll("#node-table thead th").forEach((th) => {
 $("node-filter").addEventListener("input", (e) => {
   filterText = e.target.value;
   renderTable();
+});
+["filter-country", "filter-source", "filter-attr"].forEach((id) => {
+  $(id).addEventListener("change", (e) => {
+    if (id === "filter-country") filterCountry = e.target.value;
+    if (id === "filter-source") filterSource = e.target.value;
+    if (id === "filter-attr") filterAttr = e.target.value;
+    renderTable();
+  });
 });
 
 
@@ -858,6 +1017,7 @@ function connectStream() {
 document.addEventListener("conduit-theme-change", drawChart);
 document.addEventListener("conduit-language-change", () => {
   if (lastState) renderState(lastState);
+  populateNodeFilters();
   renderTable();
   populateRouteSelects();
   renderRoute();
@@ -895,9 +1055,11 @@ setInterval(() => {
       renderState(snap);
       const cn = snap.current_node;
       pushLatency(cn ? cn.latency_ms : null);
+      if ((snap.purity_pending || 0) > 0) loadNodes();
     })
     .catch(() => {});
 }, 3000);
+setInterval(loadNodes, 5000);
 
 loadNodes();
 loadLogs();

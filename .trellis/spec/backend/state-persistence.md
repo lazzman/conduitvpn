@@ -23,6 +23,7 @@ host 模式若目录是空的，`EnsureStartupTemplate` 写入不含密码的 `c
 | 文件 | 类型 | 读写方 |
 |------|------|--------|
 | `nodes.json` | `[]*node.Node` | `SaveNodes` / `LoadNodes`；含 `config_text`（磁盘需要它来重连） |
+| `ip_purity.json` | map[string]purity.Record | `SavePurity` / `LoadPurity`；按 IP 缓存来源/属性/国家/邮编，缺文件当空 map |
 | `blacklist.json` | `map[string]BlacklistEntry` | host 名 → `{reason, marked_at}` |
 | `route.json` | `Route{mode,country,node}` | UI 设置优先于 env |
 | `ui_auth.json` | 用户名 + PBKDF2 盐/哈希 + `secret_path` | 启动时 `EnsureAuthConfigured` |

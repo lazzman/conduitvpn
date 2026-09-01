@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"conduitvpn/internal/purity"
 )
 
 func TestVPNGateSourcesRoundTripAndPermissions(t *testing.T) {
@@ -220,5 +222,49 @@ func TestRandomCredShape(t *testing.T) {
 		if !hasLower || !hasUpper || !hasDigit {
 			t.Fatalf("bad cred %q", c)
 		}
+	}
+}
+
+func TestPurityCacheRoundTrip(t *testing.T) {
+	s := NewStore(t.TempDir())
+	got, err := s.LoadPurity()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("missing file should be empty: %v %#v", err, got)
+	}
+	want := map[string]purity.Record{
+		"1.2.3.4": {Source: "isp", Country: "CN", Postal: "230000"},
+		"8.8.8.8": {Source: "hosting", Hosting: true, Attrs: []string{"hosting"}},
+	}
+	if err := s.SavePurity(want); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(s.PurityPath())
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("purity file perm=%v err=%v", info.Mode(), err)
+	}
+	got, err = s.LoadPurity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["1.2.3.4"].Source != "isp" || got["1.2.3.4"].Postal != "230000" {
+		t.Fatalf("got %#v", got)
+	}
+	if !got["8.8.8.8"].Hosting {
+		t.Fatalf("hosting not round-tripped: %#v", got["8.8.8.8"])
+	}
+}
+
+func TestPurityCacheCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	if err := os.WriteFile(s.PurityPath(), []byte("{not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadPurity()
+	if err == nil {
+		t.Fatal("expected corrupt error")
+	}
+	if got == nil {
+		t.Fatal("corrupt load should still return a map")
 	}
 }

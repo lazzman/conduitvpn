@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"conduitvpn/internal/node"
+	"conduitvpn/internal/purity"
 )
 
 type Store struct {
@@ -111,6 +112,29 @@ func (s *Store) LoadVPNGateSources() (VPNGateSources, error) {
 		sources.Mirrors = []string{}
 	}
 	return sources, nil
+}
+
+func (s *Store) PurityPath() string { return filepath.Join(s.dir, "ip_purity.json") }
+
+func (s *Store) SavePurity(recs map[string]purity.Record) error {
+	if recs == nil {
+		recs = map[string]purity.Record{}
+	}
+	return writeJSON(s.PurityPath(), recs)
+}
+
+func (s *Store) LoadPurity() (map[string]purity.Record, error) {
+	recs := map[string]purity.Record{}
+	if err := readJSON(s.PurityPath(), &recs); err != nil {
+		if os.IsNotExist(err) {
+			return recs, nil
+		}
+		return recs, err
+	}
+	if recs == nil {
+		recs = map[string]purity.Record{}
+	}
+	return recs, nil
 }
 
 // BlacklistEntry records why and when a node was blacklisted.

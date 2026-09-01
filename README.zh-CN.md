@@ -214,7 +214,7 @@ VPNGATE_API_URL=https://<password>@vpngate-proxy.example.workers.dev/api/iphone/
 | 端点 | 方法 | 用途 |
 | --- | --- | --- |
 | `/api/state` | `GET` | 当前网关状态 |
-| `/api/nodes` | `GET` | 脱敏节点列表 |
+| `/api/nodes` | `GET` | 脱敏节点列表（含 IP 纯净度 `purity`） |
 | `/api/route` | `GET`、`PUT` | 读取或设置自动、国家地区、固定节点路由 |
 | `/api/blacklist` | `GET` | 黑名单节点 |
 | `/api/logs`、`/api/logs/stream` | `GET`、`GET` SSE | 最近日志和实时日志流 |

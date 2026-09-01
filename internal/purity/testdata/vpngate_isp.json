@@ -1,0 +1,19 @@
+{
+  "input": "1.244.119.231",
+  "data": {
+    "ip": "1.244.119.231",
+    "city": "Seoul",
+    "region": "Seoul",
+    "country": "KR",
+    "org": "AS9318 SK Broadband Co Ltd",
+    "postal": "03121",
+    "asn": {"type": "isp"},
+    "company": {"type": "isp"},
+    "privacy": {"vpn": true, "proxy": false, "tor": false, "relay": false, "hosting": false},
+    "is_anycast": false,
+    "is_mobile": false,
+    "is_anonymous": true,
+    "is_satellite": false,
+    "is_hosting": false
+  }
+}

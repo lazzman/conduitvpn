@@ -29,6 +29,7 @@ import (
 	"conduitvpn/internal/logx"
 	"conduitvpn/internal/manager"
 	"conduitvpn/internal/node"
+	"conduitvpn/internal/purity"
 	"conduitvpn/internal/state"
 	"conduitvpn/internal/vpngate"
 )
@@ -498,6 +499,7 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 		"route_mode":      snap.RouteMode,
 		"route_country":   snap.RouteCountry,
 		"route_node":      snap.RouteNode,
+		"purity_pending":  snap.PurityPending,
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -591,13 +593,35 @@ func (s *Server) apiNodes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-	safe := make([]*node.Node, 0, len(nodes))
-	for _, n := range nodes {
-		if n != nil {
-			safe = append(safe, sanitizeNode(n))
-		}
+	cache, _ := s.store.LoadPurity()
+	writeJSON(w, http.StatusOK, attachPurity(nodes, cache))
+}
+
+type apiNode struct {
+	node.Node
+	Purity *purity.Info `json:"purity,omitempty"`
+}
+
+func attachPurity(nodes []*node.Node, cache map[string]purity.Record) []apiNode {
+	if cache == nil {
+		cache = map[string]purity.Record{}
 	}
-	writeJSON(w, http.StatusOK, safe)
+	out := make([]apiNode, 0, len(nodes))
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		view := apiNode{Node: *sanitizeNode(n)}
+		if rec, ok := cache[n.IP]; ok {
+			info := rec.View()
+			view.Purity = &info
+		} else {
+			info := purity.PendingInfo()
+			view.Purity = &info
+		}
+		out = append(out, view)
+	}
+	return out
 }
 
 func (s *Server) apiBlacklist(w http.ResponseWriter, r *http.Request) {

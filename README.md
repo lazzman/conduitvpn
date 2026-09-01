@@ -214,7 +214,7 @@ VPNGATE_API_URL=https://<password>@vpngate-proxy.example.workers.dev/api/iphone/
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
 | `/api/state` | `GET` | Current gateway state |
-| `/api/nodes` | `GET` | Sanitized node list |
+| `/api/nodes` | `GET` | Sanitized node list with IP purity (`purity`) |
 | `/api/route` | `GET`, `PUT` | Read or set automatic, country, or fixed-node routing |
 | `/api/blacklist` | `GET` | Blacklisted nodes |
 | `/api/logs`, `/api/logs/stream` | `GET`, `GET` SSE | Recent logs and live log stream |

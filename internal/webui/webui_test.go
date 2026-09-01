@@ -13,6 +13,7 @@ import (
 	"conduitvpn/internal/config"
 	"conduitvpn/internal/manager"
 	"conduitvpn/internal/node"
+	"conduitvpn/internal/purity"
 	"conduitvpn/internal/state"
 	"conduitvpn/internal/vpngate"
 )
@@ -558,4 +559,56 @@ func testServer(t *testing.T, demo bool) *Server {
 	}
 	cfg := config.Config{DataDir: dir, Demo: demo}
 	return New(cfg, store, manager.New(cfg))
+}
+
+func TestAPINodesStripsConfigAndMergesPurity(t *testing.T) {
+	s := testServer(t, false)
+	nodes := []*node.Node{{
+		HostName: "vpn-jp-1", IP: "203.0.113.10", CountryShort: "JP", ConfigText: "SECRET-PROFILE",
+	}}
+	if err := s.store.SaveNodes(nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SavePurity(map[string]purity.Record{
+		"203.0.113.10": {Source: "isp", Country: "KR", Postal: "03121", City: "Seoul"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	s.apiNodes(w, httptest.NewRequest(http.MethodGet, "/api/nodes", nil))
+	body := w.Body.String()
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, body)
+	}
+	if strings.Contains(body, "SECRET-PROFILE") {
+		t.Fatalf("config leaked: %s", body)
+	}
+	if !strings.Contains(body, `"source":"isp"`) || !strings.Contains(body, `"country":"KR"`) || !strings.Contains(body, `"postal":"03121"`) {
+		t.Fatalf("purity missing: %s", body)
+	}
+}
+
+func TestAPINodesPendingWithoutCache(t *testing.T) {
+	s := testServer(t, false)
+	if err := s.store.SaveNodes([]*node.Node{{HostName: "vpn-1", IP: "203.0.113.99", CountryShort: "US"}}); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	s.apiNodes(w, httptest.NewRequest(http.MethodGet, "/api/nodes", nil))
+	body := w.Body.String()
+	if !strings.Contains(body, `"status":"pending"`) {
+		t.Fatalf("pending missing: %s", body)
+	}
+}
+
+func TestEmbeddedNodePurityUI(t *testing.T) {
+	page, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"filter-country", "filter-source", "filter-attr", "nodes.source", "nodes.attrs", "nodes.postal"} {
+		if !strings.Contains(string(page), want) {
+			t.Fatalf("index.html missing %q", want)
+		}
+	}
 }

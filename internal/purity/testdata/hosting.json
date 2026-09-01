@@ -1,0 +1,19 @@
+{
+  "input": "146.235.204.193",
+  "data": {
+    "ip": "146.235.204.193",
+    "city": "San Jose",
+    "region": "California",
+    "country": "US",
+    "org": "AS31898 Oracle Corporation",
+    "postal": "95119",
+    "asn": {"type": "hosting"},
+    "company": {"type": "hosting"},
+    "privacy": {"vpn": false, "proxy": false, "tor": false, "relay": false, "hosting": true},
+    "is_anycast": false,
+    "is_mobile": false,
+    "is_anonymous": false,
+    "is_satellite": false,
+    "is_hosting": true
+  }
+}

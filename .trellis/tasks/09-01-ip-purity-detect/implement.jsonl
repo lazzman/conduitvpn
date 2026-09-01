@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "新包归属与 JSON 字段命名"}
+{"file": ".trellis/spec/backend/state-persistence.md", "reason": "ip_purity.json 原子写"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "零依赖与节点 API 脱敏"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "logx 字段约定"}
+{"file": ".trellis/spec/backend/network-modes.md", "reason": "container 出站可能走 tun"}
+{"file": ".trellis/spec/frontend/ui-conventions.md", "reason": "i18n、XSS、相对 API 路径"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "nodes.json 到 API 到 UI 的字段流"}

@@ -491,6 +491,7 @@ func (m *Manager) refreshNodes(ctx context.Context, foreground bool) []*node.Nod
 		attempts = append(attempts, attempt)
 		m.finishSourceRefresh(attempts, displayURL, true)
 		logx.Info("VPNGate source selected", "url", displayURL, "nodes", len(candidates))
+		m.enrichPurity(ctx, candidates)
 		return candidates
 	}
 
@@ -509,6 +510,7 @@ func (m *Manager) refreshNodes(ctx context.Context, foreground bool) []*node.Nod
 		}
 	}
 	m.finishSourceRefresh(attempts, "", false)
+	m.enrichPurity(ctx, cached)
 	return cached
 }
 
