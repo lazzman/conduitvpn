@@ -1,0 +1,4 @@
+interface:
+  display_name: "ConduitVPN 上游安全 Rebase"
+  short_description: "安全同步 upstream/main 并发布到个人 origin"
+  default_prompt: "使用 $conduitvpn-rebase-upstream 将当前分支安全 rebase 到 upstream/main，保留本地提交并在验证后强推到 origin。"
