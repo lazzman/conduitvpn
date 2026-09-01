@@ -248,7 +248,7 @@ make test
 make vet
 ```
 
-GitHub Actions 会在 Linux 和 macOS 上执行 vet 与测试，构建 `linux/amd64`、`linux/arm64` 多架构镜像，并在版本标签上附加静态二进制文件。
+GitHub Actions 拆成两个 workflow：`build.yml` 在 Linux 和 macOS 上执行 vet 与测试、上传静态二进制，并在版本标签上发布 Release；`docker.yml` 在 Linux 测试通过后构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像到 GHCR（`ghcr.io/<owner>/<repo>`）。纯文档改动会跳过镜像构建；也可以在 Actions 里手动运行 `docker`。
 
 ## 已知边界
 

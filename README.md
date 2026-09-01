@@ -248,7 +248,7 @@ make test
 make vet
 ```
 
-GitHub Actions run vet and tests on Linux and macOS, build multi-architecture container images for `linux/amd64` and `linux/arm64`, and attach static binaries to version tags.
+GitHub Actions is split into two workflows. `build.yml` runs vet and tests on Linux and macOS, uploads static binaries, and publishes them on version tags. `docker.yml` runs Linux tests, then builds and pushes `linux/amd64` and `linux/arm64` images to GHCR (`ghcr.io/<owner>/<repo>`). Documentation-only changes skip the image build; you can also run the `docker` workflow manually from the Actions tab.
 
 ## Known Limits
 
