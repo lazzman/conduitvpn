@@ -36,6 +36,7 @@ func (m *Manager) lookupPurity(ctx context.Context, nodes []*node.Node) {
 	}
 	m.purityMu.Unlock()
 	if len(pending) == 0 {
+		logx.Info("purity lookup skipped", "cached", len(seen))
 		return
 	}
 
