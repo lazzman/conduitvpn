@@ -253,6 +253,7 @@ GitHub Actions is split into two workflows. `build.yml` runs vet and tests on Li
 ## Known Limits
 
 - Blacklisted nodes do not expire automatically and remain blacklisted after restart.
+- IP purity lookups use the free ip-api.com endpoint (45 requests/minute, HTTP only). Successful results expire after 24 hours. HTTP 429 waits for the X-Ttl header and is not cached; other lookup failures expire after 30 minutes.
 - A fixed node that remains unavailable is retried indefinitely, by design.
 - Upstream availability depends on the source IP policy of that upstream.
 - Subscriptions are fetched only once during startup.

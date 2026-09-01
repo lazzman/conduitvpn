@@ -1,5 +1,10 @@
 package purity
 
+import (
+	"strings"
+	"time"
+)
+
 // Record is the persisted lookup for one public IPv4 address.
 type Record struct {
 	Source    string   `json:"source,omitempty"`
@@ -31,6 +36,12 @@ const (
 	StatusPending = "pending"
 	StatusOK      = "ok"
 	StatusError   = "error"
+
+	// SuccessTTL is how long a successful lookup is reused before refresh.
+	SuccessTTL = 24 * time.Hour
+	// ErrorTTL is how long a non-rate-limit failure is remembered before retry.
+	// 429 waits use the X-Ttl header instead and are not cached as errors.
+	ErrorTTL = 30 * time.Minute
 )
 
 // View returns the API payload for a cached record.
@@ -55,4 +66,23 @@ func (r Record) View() Info {
 // PendingInfo is used when an IP has not been looked up yet.
 func PendingInfo() Info {
 	return Info{Status: StatusPending}
+}
+
+// Fresh reports whether the record is still within its cache TTL.
+func (r Record) Fresh(now time.Time) bool {
+	if strings.TrimSpace(r.CheckedAt) == "" {
+		return false
+	}
+	checked, err := time.Parse(time.RFC3339, r.CheckedAt)
+	if err != nil {
+		return false
+	}
+	ttl := SuccessTTL
+	if r.Error != "" {
+		ttl = ErrorTTL
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return now.Sub(checked) < ttl
 }

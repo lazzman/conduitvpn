@@ -22,13 +22,14 @@ func (m *Manager) lookupPurity(ctx context.Context, nodes []*node.Node) {
 	seen := map[string]bool{}
 	m.purityMu.Lock()
 	cache := m.loadPurityCache()
+	now := time.Now()
 	for _, n := range nodes {
 		ip := n.IP
 		if ip == "" || seen[ip] {
 			continue
 		}
 		seen[ip] = true
-		if rec, ok := cache[ip]; ok && rec.Error == "" {
+		if rec, ok := cache[ip]; ok && rec.Fresh(now) {
 			continue
 		}
 		pending = append(pending, ip)
@@ -42,31 +43,34 @@ func (m *Manager) lookupPurity(ctx context.Context, nodes []*node.Node) {
 	defer m.purityPending.Store(0)
 	logx.Info("purity lookup started", "count", len(pending))
 
-	delay := 300 * time.Millisecond
 	for i, ip := range pending {
 		if ctx.Err() != nil {
 			logx.Warn("purity lookup canceled", "done", i, "count", len(pending))
 			return
 		}
 		rec, err := m.purityLookup(ctx, ip)
-		if errors.Is(err, purity.ErrRateLimited) {
-			logx.Warn("purity lookup rate limited", "ip", ip)
+		for errors.Is(err, purity.ErrRateLimited) {
+			wait := purity.RetryAfter(err)
+			logx.Warn("purity lookup rate limited", "ip", ip, "ttl", wait.String())
 			select {
 			case <-ctx.Done():
+				logx.Warn("purity lookup canceled", "done", i, "count", len(pending))
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.After(wait):
 			}
 			rec, err = m.purityLookup(ctx, ip)
-			delay = 800 * time.Millisecond
 		}
-		now := time.Now().UTC().Format(time.RFC3339)
+		if ctx.Err() != nil {
+			return
+		}
+		checked := time.Now().UTC().Format(time.RFC3339)
 		m.purityMu.Lock()
 		cache := m.loadPurityCache()
 		if err != nil {
-			cache[ip] = purity.Record{Error: err.Error(), CheckedAt: now}
+			cache[ip] = purity.Record{Error: err.Error(), CheckedAt: checked}
 			logx.Warn("purity lookup failed", "ip", ip, "err", err)
 		} else {
-			rec.CheckedAt = now
+			rec.CheckedAt = checked
 			cache[ip] = rec
 			logx.Debug("purity lookup ok", "ip", ip, "source", rec.Source, "hosting", rec.Hosting)
 		}
@@ -76,14 +80,6 @@ func (m *Manager) lookupPurity(ctx context.Context, nodes []*node.Node) {
 		left := int32(len(pending) - i - 1)
 		m.purityPending.Store(left)
 		m.purityMu.Unlock()
-		if left == 0 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-		}
 	}
 	logx.Info("purity lookup finished", "count", len(pending))
 }

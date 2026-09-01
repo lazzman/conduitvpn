@@ -1,19 +1,16 @@
 {
-  "input": "146.235.204.193",
-  "data": {
-    "ip": "146.235.204.193",
-    "city": "San Jose",
-    "region": "California",
-    "country": "US",
-    "org": "AS31898 Oracle Corporation",
-    "postal": "95119",
-    "asn": {"type": "hosting"},
-    "company": {"type": "hosting"},
-    "privacy": {"vpn": false, "proxy": false, "tor": false, "relay": false, "hosting": true},
-    "is_anycast": false,
-    "is_mobile": false,
-    "is_anonymous": false,
-    "is_satellite": false,
-    "is_hosting": true
-  }
+  "status": "success",
+  "country": "United States",
+  "countryCode": "US",
+  "regionName": "California",
+  "city": "San Jose",
+  "zip": "95119",
+  "isp": "Oracle Corporation",
+  "org": "Oracle Cloud Infrastructure (us-sanjose-1)",
+  "as": "AS31898 Oracle Corporation",
+  "asname": "ORACLE-BMC-31898",
+  "mobile": false,
+  "proxy": false,
+  "hosting": true,
+  "query": "146.235.204.193"
 }

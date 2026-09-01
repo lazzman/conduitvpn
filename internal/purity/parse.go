@@ -6,83 +6,69 @@ import (
 	"strings"
 )
 
-type widgetResponse struct {
-	Data widgetData `json:"data"`
+type apiResponse struct {
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	Query       string `json:"query"`
+	Country     string `json:"country"`
+	CountryCode string `json:"countryCode"`
+	RegionName  string `json:"regionName"`
+	City        string `json:"city"`
+	Zip         string `json:"zip"`
+	ISP         string `json:"isp"`
+	Org         string `json:"org"`
+	AS          string `json:"as"`
+	ASName      string `json:"asname"`
+	Mobile      bool   `json:"mobile"`
+	Proxy       bool   `json:"proxy"`
+	Hosting     bool   `json:"hosting"`
 }
 
-type widgetData struct {
-	IP          string        `json:"ip"`
-	City        string        `json:"city"`
-	Region      string        `json:"region"`
-	Country     string        `json:"country"`
-	Org         string        `json:"org"`
-	Postal      string        `json:"postal"`
-	ASN         widgetTyped   `json:"asn"`
-	Company     widgetTyped   `json:"company"`
-	Privacy     widgetPrivacy `json:"privacy"`
-	IsAnycast   bool          `json:"is_anycast"`
-	IsMobile    bool          `json:"is_mobile"`
-	IsAnonymous bool          `json:"is_anonymous"`
-	IsSatellite bool          `json:"is_satellite"`
-	IsHosting   bool          `json:"is_hosting"`
-}
-
-type widgetTyped struct {
-	Type string `json:"type"`
-}
-
-type widgetPrivacy struct {
-	VPN     bool `json:"vpn"`
-	Proxy   bool `json:"proxy"`
-	Tor     bool `json:"tor"`
-	Relay   bool `json:"relay"`
-	Hosting bool `json:"hosting"`
-}
-
-var attrOrder = []struct {
-	name string
-	on   func(widgetData) bool
-}{
-	{"vpn", func(d widgetData) bool { return d.Privacy.VPN }},
-	{"proxy", func(d widgetData) bool { return d.Privacy.Proxy }},
-	{"tor", func(d widgetData) bool { return d.Privacy.Tor }},
-	{"relay", func(d widgetData) bool { return d.Privacy.Relay }},
-	{"hosting", func(d widgetData) bool { return d.Privacy.Hosting || d.IsHosting }},
-	{"mobile", func(d widgetData) bool { return d.IsMobile }},
-	{"anycast", func(d widgetData) bool { return d.IsAnycast }},
-	{"anonymous", func(d widgetData) bool { return d.IsAnonymous }},
-	{"satellite", func(d widgetData) bool { return d.IsSatellite }},
-}
-
-// Parse maps an ipinfo widget/demo JSON body onto a Record.
+// Parse maps an ip-api.com JSON body onto a Record.
 func Parse(raw []byte) (Record, error) {
-	var resp widgetResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return Record{}, fmt.Errorf("decode ipinfo: %w", err)
+	var d apiResponse
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return Record{}, fmt.Errorf("decode ip-api: %w", err)
 	}
-	d := resp.Data
-	if strings.TrimSpace(d.IP) == "" && d.Country == "" && d.ASN.Type == "" && d.Company.Type == "" {
-		return Record{}, fmt.Errorf("ipinfo response missing data")
-	}
-	source := strings.ToLower(strings.TrimSpace(d.ASN.Type))
-	if source == "" {
-		source = strings.ToLower(strings.TrimSpace(d.Company.Type))
-	}
-	hosting := d.Privacy.Hosting || d.IsHosting || source == "hosting" || strings.ToLower(d.Company.Type) == "hosting"
-	attrs := make([]string, 0, len(attrOrder))
-	for _, attr := range attrOrder {
-		if attr.on(d) {
-			attrs = append(attrs, attr.name)
+	if strings.EqualFold(strings.TrimSpace(d.Status), "fail") {
+		msg := strings.TrimSpace(d.Message)
+		if msg == "" {
+			msg = "lookup failed"
 		}
+		return Record{}, fmt.Errorf("ip-api: %s", msg)
+	}
+	if strings.TrimSpace(d.Query) == "" && d.CountryCode == "" && d.ISP == "" && d.Org == "" && d.AS == "" {
+		return Record{}, fmt.Errorf("ip-api response missing data")
+	}
+	source := "isp"
+	if d.Hosting {
+		source = "hosting"
+	}
+	attrs := make([]string, 0, 3)
+	if d.Proxy {
+		attrs = append(attrs, "proxy")
+	}
+	if d.Hosting {
+		attrs = append(attrs, "hosting")
+	}
+	if d.Mobile {
+		attrs = append(attrs, "mobile")
+	}
+	org := strings.TrimSpace(d.Org)
+	if org == "" {
+		org = strings.TrimSpace(d.ISP)
+	}
+	if org == "" {
+		org = strings.TrimSpace(d.AS)
 	}
 	return Record{
 		Source:  source,
-		Hosting: hosting,
+		Hosting: d.Hosting,
 		Attrs:   attrs,
-		Country: strings.ToUpper(strings.TrimSpace(d.Country)),
-		Postal:  strings.TrimSpace(d.Postal),
+		Country: strings.ToUpper(strings.TrimSpace(d.CountryCode)),
+		Postal:  strings.TrimSpace(d.Zip),
 		City:    strings.TrimSpace(d.City),
-		Region:  strings.TrimSpace(d.Region),
-		Org:     strings.TrimSpace(d.Org),
+		Region:  strings.TrimSpace(d.RegionName),
+		Org:     org,
 	}, nil
 }

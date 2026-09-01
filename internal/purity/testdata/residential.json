@@ -1,19 +1,16 @@
 {
-  "input": "36.57.106.193",
-  "data": {
-    "ip": "36.57.106.193",
-    "city": "Hefei",
-    "region": "Anhui",
-    "country": "CN",
-    "org": "AS4134 CHINANET BACKBONE",
-    "postal": "230000",
-    "asn": {"type": "isp"},
-    "company": {"type": "isp"},
-    "privacy": {"vpn": false, "proxy": false, "tor": false, "relay": false, "hosting": false},
-    "is_anycast": false,
-    "is_mobile": false,
-    "is_anonymous": false,
-    "is_satellite": false,
-    "is_hosting": false
-  }
+  "status": "success",
+  "country": "China",
+  "countryCode": "CN",
+  "regionName": "Anhui",
+  "city": "Hefei",
+  "zip": "230000",
+  "isp": "Chinanet",
+  "org": "Chinanet AH",
+  "as": "AS4134 CHINANET BACKBONE",
+  "asname": "CHINANET-BACKBONE",
+  "mobile": false,
+  "proxy": false,
+  "hosting": false,
+  "query": "36.57.106.193"
 }
