@@ -32,3 +32,21 @@ func TestNewDeviceDialerRequiresDevice(t *testing.T) {
 		t.Fatal("missing device should be rejected")
 	}
 }
+
+func TestReplaceDefaultDevRequiresDevice(t *testing.T) {
+	if err := ReplaceDefaultDev(""); err == nil {
+		t.Fatal("empty device should be rejected")
+	}
+}
+
+func TestHostSwitchRequiresDevice(t *testing.T) {
+	if err := New("host").Switch(""); err == nil {
+		t.Fatal("empty device should be rejected")
+	}
+}
+
+func TestContainerSwitchIsNoop(t *testing.T) {
+	if err := New("container").Switch(""); err != nil {
+		t.Fatalf("container switch = %v", err)
+	}
+}

@@ -102,3 +102,25 @@ func clearDeviceRoute() {
 		_ = runIP(args...)
 	}
 }
+
+func switchHostRoute(device string) error {
+	if err := runIP(switchHostRouteArgs(device)...); err != nil {
+		return fmt.Errorf("switch tunnel route: %w", err)
+	}
+	return nil
+}
+
+func switchHostRouteArgs(device string) []string {
+	return []string{"route", "replace", "default", "dev", device, "table", routeTable}
+}
+
+func replaceDefaultDev(device string) error {
+	if err := runIP(replaceDefaultDevArgs(device)...); err != nil {
+		return fmt.Errorf("replace default route: %w", err)
+	}
+	return nil
+}
+
+func replaceDefaultDevArgs(device string) []string {
+	return []string{"route", "replace", "default", "dev", device}
+}

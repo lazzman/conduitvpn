@@ -62,4 +62,4 @@ logx.Error(msg, kv...)
 data: {"type":"log"|"state","payload":...}
 ```
 
-`state` 快照里的 `current_node` 必须先 `sanitizeNode`。不要把 `logx` 的 ring map 原样扩展成带二进制或超大字段的条目。
+`state` 快照里的 `current_node` / `target_node` 必须先 `sanitizeNode`。不要把 `logx` 的 ring map 原样扩展成带二进制或超大字段的条目。

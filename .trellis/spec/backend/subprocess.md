@@ -64,7 +64,7 @@ fetchAndBench → selectCandidates → connectLoop
   耗尽 → drifting → 等待 → 再拉取
 ```
 
-不要为「并行连多个 OpenVPN」再开协程。黑名单验证隧道是短命、隔离的，用 `NewDeviceDialer`，不要替换正在服务的 `m.tun`。
+不要为「并行连多个 OpenVPN」再开协程。切流时监督协程自己拉起一条 route-nopull 备隧道，握手+探测成功后再把 `m.tun` 换成新的；黑名单验证隧道仍是短命、隔离的，用 `NewDeviceDialer`，不要替换正在服务的 `m.tun`。
 
 ---
 

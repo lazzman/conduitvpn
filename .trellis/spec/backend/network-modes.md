@@ -46,6 +46,15 @@ hy2 只在 container 装配：`hy2.Start` 写自签证书 + sing-box hysteria2 i
 
 黑名单隔离验证用 `NewDeviceDialer`，不要去动正在服务的 `Controller`。
 
+## 节点切换（make-before-break）
+
+有正在服务的隧道时，监督器先拉起第二条 **route-nopull** 的 OpenVPN，用 `NewDeviceProber` 做握手后探测；成功后再切流，失败则只停备隧道、旧链路继续服务。
+
+- host：`egress.Switch(newDev)` 只替换策略表里的 default，不去 `Clear()` / 重加 fwmark 规则。
+- container：`egress.ReplaceDefaultDev(newDev)`（`ip route replace default dev <tun>`），停旧进程后再 assert 一次——旧 OpenVPN 退出可能把 default 改回去。
+- 切流期复用 `connecting` + Snapshot `target_node`，不要新增 state 字符串。
+- 不要动 netfix 的 mark/table，也不要和探测表 `51821` 抢。
+
 ---
 
 ## 代理与探测

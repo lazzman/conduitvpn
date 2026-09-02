@@ -20,3 +20,14 @@ func TestHostRouteCommands(t *testing.T) {
 		t.Fatalf("unexpected cleanup commands: %#v", cleanup)
 	}
 }
+
+func TestSwitchAndReplaceDefaultCommands(t *testing.T) {
+	wantSwitch := []string{"route", "replace", "default", "dev", "tun1", "table", routeTable}
+	if got := switchHostRouteArgs("tun1"); !reflect.DeepEqual(got, wantSwitch) {
+		t.Fatalf("switch commands = %#v, want %#v", got, wantSwitch)
+	}
+	wantDefault := []string{"route", "replace", "default", "dev", "tun1"}
+	if got := replaceDefaultDevArgs("tun1"); !reflect.DeepEqual(got, wantDefault) {
+		t.Fatalf("replace default = %#v, want %#v", got, wantDefault)
+	}
+}

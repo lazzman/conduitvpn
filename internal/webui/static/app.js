@@ -51,6 +51,21 @@ function renderState(snap) {
   $("c-proxy").textContent = snap.proxy_port || "7928";
   $("c-uptime").textContent = fmtUptime(snap.uptime_sec);
   $("c-blacklist").textContent = window.ConduitI18n.t("blacklist.count", { count: snap.blacklist_count || 0 });
+
+  const hint = $("switch-hint");
+  const target = snap.target_node || null;
+  if (hint) {
+    if (target && n && target.host_name && target.host_name !== n.host_name) {
+      hint.hidden = false;
+      hint.textContent = window.ConduitI18n.t("card.switching", {
+        target: target.host_name,
+        current: n.host_name,
+      });
+    } else {
+      hint.hidden = true;
+      hint.textContent = "";
+    }
+  }
 }
 
 /* ---- blacklist manager ---- */

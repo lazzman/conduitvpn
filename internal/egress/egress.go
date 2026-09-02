@@ -56,6 +56,37 @@ func (c *Controller) Configure(device string) error {
 	return nil
 }
 
+// Switch moves host-mode sockets onto a new tunnel device without
+// dropping the existing policy rule. Container mode is a no-op.
+func (c *Controller) Switch(device string) error {
+	if !c.HostMode() {
+		return nil
+	}
+	if device == "" {
+		return errors.New("OpenVPN did not report a tunnel device")
+	}
+	if _, err := net.InterfaceByName(device); err != nil {
+		return err
+	}
+	if err := switchHostRoute(device); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.device = device
+	c.ready = true
+	c.mu.Unlock()
+	return nil
+}
+
+// ReplaceDefaultDev points the namespace default route at device. Used
+// for container-mode make-before-break; host mode must not call this.
+func ReplaceDefaultDev(device string) error {
+	if device == "" {
+		return errors.New("tunnel device is required")
+	}
+	return replaceDefaultDev(device)
+}
+
 // Clear removes host-mode policy state before the tunnel is stopped and
 // immediately makes future application dials fail closed.
 func (c *Controller) Clear() {

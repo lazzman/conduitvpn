@@ -377,6 +377,19 @@ select.input option { background: var(--surface); color: var(--text); }
 }
 .site-footer a:hover { color: var(--accent); }
 
+/* ---- switch hint ---- */
+.switch-hint {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.switch-hint[hidden] { display: none; }
+
 /* ---- status cards ---- */
 .cards {
   display: grid;

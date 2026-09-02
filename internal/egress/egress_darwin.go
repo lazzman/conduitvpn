@@ -37,3 +37,7 @@ func bindSocket(device string, raw syscall.RawConn) error {
 func bindDeviceSocket(device string, raw syscall.RawConn) error { return bindSocket(device, raw) }
 
 func setupDeviceRoute(_ string) (func(), error) { return func() {}, nil }
+
+func switchHostRoute(_ string) error { return nil }
+
+func replaceDefaultDev(_ string) error { return nil }

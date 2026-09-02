@@ -492,6 +492,7 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 		"state":           snap.State,
 		"detail":          snap.Detail,
 		"current_node":    sanitizeNode(snap.CurrentNode),
+		"target_node":     sanitizeNode(snap.TargetNode),
 		"blacklist_count": snap.BlacklistCount,
 		"uptime_sec":      snap.UptimeSec,
 		"proxy_port":      s.cfg.LocalProxyPort,
@@ -674,6 +675,7 @@ func (s *Server) apiLogStream(w http.ResponseWriter, r *http.Request) {
 	// The SSE state snapshot must not leak the raw OpenVPN config.
 	snap := s.mgr.Snapshot()
 	snap.CurrentNode = sanitizeNode(snap.CurrentNode)
+	snap.TargetNode = sanitizeNode(snap.TargetNode)
 	send("state", snap)
 	for {
 		select {
@@ -684,6 +686,7 @@ func (s *Server) apiLogStream(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 			s := s.mgr.Snapshot()
 			s.CurrentNode = sanitizeNode(s.CurrentNode)
+			s.TargetNode = sanitizeNode(s.TargetNode)
 			send("state", s)
 		}
 	}

@@ -28,7 +28,7 @@
 |------|------|----------|
 | env ↔ `route.json` | 磁盘赢。`New` 加载 route 覆盖 env | 改 `ROUTE_MODE` 却发现 UI 上次的 fixed 还在 |
 | env ↔ `ui_auth.json` | 启动时用 env 密码重哈希；secret_path 稳定 | 轮换 secret 导致管理 URL 失效 |
-| `node.Node` ↔ HTTP | Snapshot/SSE 必须 `sanitizeNode` | `GET /api/nodes` 目前仍可能带 `config_text`——不要再开一条同样的口 |
+| `node.Node` ↔ HTTP | Snapshot/SSE 必须 `sanitizeNode`（含 `current_node` / `target_node`） | `GET /api/nodes` 目前仍可能带 `config_text`——不要再开一条同样的口 |
 | `manager.State` ↔ UI 药丸 | 字符串：`idle/fetching/connecting/connected/drifting` | 按 README 的 PROBING/STABLE 去画，药丸会一直 idle 样式 |
 | API `code` ↔ i18n | 三语 `errors.<code>` | 只加了 Go 侧，界面显示 raw key |
 | OpenVPN profile ↔ 进程 | `ValidateOpenVPNProfile` 在 parse 和 `prepareFiles` | 相信缓存的 `nodes.json` 里的旧配置 |

@@ -24,3 +24,9 @@ func bindDeviceSocket(_ string, _ syscall.RawConn) error {
 func setupDeviceRoute(_ string) (func(), error) {
 	return nil, fmt.Errorf("temporary tunnel verification is only supported on Linux and macOS")
 }
+
+func switchHostRoute(_ string) error {
+	return fmt.Errorf("NETWORK_MODE=host is only supported on Linux and macOS")
+}
+
+func replaceDefaultDev(_ string) error { return nil }

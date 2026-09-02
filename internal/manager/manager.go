@@ -47,6 +47,7 @@ type Manager struct {
 	state             State
 	stateDetail       string
 	current           *node.Node
+	target            *node.Node
 	blacklist         map[string]state.BlacklistEntry
 	blacklistTest     BlacklistTestStatus
 	blacklistVerifier func(context.Context, *node.Node) error
@@ -102,6 +103,7 @@ type Snapshot struct {
 	State          string     `json:"state"`
 	Detail         string     `json:"detail"`
 	CurrentNode    *node.Node `json:"current_node,omitempty"`
+	TargetNode     *node.Node `json:"target_node,omitempty"`
 	BlacklistCount int        `json:"blacklist_count"`
 	UptimeSec      int64      `json:"uptime_sec"`
 	RouteMode      string     `json:"route_mode"`
@@ -193,6 +195,7 @@ func (m *Manager) Snapshot() Snapshot {
 		State:          string(m.state),
 		Detail:         m.stateDetail,
 		CurrentNode:    cloneNode(m.current),
+		TargetNode:     cloneNode(m.target),
 		BlacklistCount: len(m.blacklist),
 		UptimeSec:      int64(time.Since(m.startedAt).Seconds()),
 	}
@@ -232,6 +235,7 @@ func (m *Manager) updateDemoCurrent(nodes []*node.Node) {
 	}
 	m.mu.Lock()
 	m.current = candidates[0]
+	m.target = nil
 	m.state = StateConnected
 	m.stateDetail = candidates[0].HostName
 	m.mu.Unlock()
@@ -354,8 +358,9 @@ func (m *Manager) fetchAndBench(ctx context.Context) []*node.Node {
 // connectLoop tries nodes best-first until one connects and stays
 // healthy; each failure blacklists the node and moves to the next.
 // The fixed-mode node is never blacklisted (it is the user's explicit
-// lock choice).
+// lock choice). A live tunnel is kept up while the next node is prepared.
 func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
+	keepOnExhaust := m.liveTunnel()
 	attempted := make(map[string]bool)
 	for {
 		if ctx.Err() != nil {
@@ -369,6 +374,37 @@ func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
 			}
 		}
 		if n == nil {
+			if keepOnExhaust && m.liveTunnel() {
+				cur := m.currentNode()
+				if cur == nil {
+					m.stopTunnel()
+					return errors.New("all candidates exhausted")
+				}
+				logx.Warn("all candidates failed; keeping current tunnel", "host", cur.HostName)
+				err := m.monitor(ctx, cur)
+				if ctx.Err() != nil {
+					m.stopTunnel()
+					return ctx.Err()
+				}
+				if errors.Is(err, errModeChanged) {
+					next, ok := m.cachedCandidates()
+					if !ok {
+						return errModeChanged
+					}
+					nodes = next
+					keepOnExhaust = true
+					attempted = make(map[string]bool)
+					logx.Info("route mode changed; re-evaluating candidates")
+					continue
+				}
+				logx.Warn("node degraded, drifting", "host", cur.HostName, "err", err)
+				m.markBlacklisted(cur, err.Error())
+				m.stopTunnel()
+				return err
+			}
+			if m.liveTunnel() {
+				m.stopTunnel()
+			}
 			return errors.New("all candidates exhausted")
 		}
 		attempted[candidateKey(n)] = true
@@ -376,6 +412,9 @@ func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
 			continue
 		}
 		if err := m.connectAndVerify(ctx, n); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logx.Warn("node failed", "host", n.HostName, "err", err)
 			m.markBlacklisted(n, err.Error())
 			if latest := m.candidateSnapshot(); len(latest) > 0 {
@@ -384,19 +423,32 @@ func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
 			continue
 		}
 		err := m.monitor(ctx, n)
-		m.stopTunnel()
-		if err != nil {
-			if errors.Is(err, errModeChanged) {
+		if ctx.Err() != nil {
+			m.stopTunnel()
+			return ctx.Err()
+		}
+		if errors.Is(err, errModeChanged) {
+			next, ok := m.cachedCandidates()
+			if !ok {
 				return errModeChanged
 			}
-			logx.Warn("node degraded, drifting", "host", n.HostName, "err", err)
-			m.markBlacklisted(n, err.Error())
-			if latest := m.candidateSnapshot(); len(latest) > 0 {
-				nodes = m.selectCandidates(latest)
-			}
+			nodes = next
+			keepOnExhaust = true
+			attempted = make(map[string]bool)
+			logx.Info("route mode changed; re-evaluating candidates")
 			continue
 		}
-		return ctx.Err()
+		logx.Warn("node degraded, drifting", "host", n.HostName, "err", err)
+		m.markBlacklisted(n, err.Error())
+		if latest := m.candidateSnapshot(); len(latest) > 0 {
+			nodes = m.selectCandidates(latest)
+		}
+		if !m.liveTunnel() {
+			m.stopTunnel()
+			keepOnExhaust = false
+		} else {
+			keepOnExhaust = true
+		}
 	}
 }
 
@@ -408,63 +460,6 @@ func candidateKey(n *node.Node) string {
 		return "host:" + n.HostName
 	}
 	return fmt.Sprintf("node:%s:%d:%s", n.IP, n.RemotePort, n.RemoteProto)
-}
-
-// connectAndVerify spawns openvpn, waits for the handshake, lets the
-// tunnel settle, then confirms egress with the HTTPS probe.
-func (m *Manager) connectAndVerify(ctx context.Context, n *node.Node) error {
-	m.setState(StateConnecting, n.HostName)
-	m.mu.Lock()
-	m.current = n
-	m.mu.Unlock()
-
-	cfgPath, authPath, err := m.prepareFiles(n)
-	if err != nil {
-		return fmt.Errorf("prepare files: %w", err)
-	}
-
-	tun := tunnel.New()
-	m.tun = tun
-	if err := tun.Start(tunnel.Options{
-		ConfigFile:  cfgPath,
-		AuthFile:    authPath,
-		RouteNoPull: m.cfg.NetworkMode == "host",
-	}); err != nil {
-		return fmt.Errorf("spawn openvpn: %w", err)
-	}
-	if err := tun.WaitHandshake(m.cfg.ConnectTimeout); err != nil {
-		m.stopTunnel()
-		return err
-	}
-	if m.cfg.NetworkMode == "host" {
-		if err := m.egress.Configure(tun.Device()); err != nil {
-			m.stopTunnel()
-			return fmt.Errorf("configure host tunnel egress: %w", err)
-		}
-	}
-
-	if !sleepCtx(ctx, m.cfg.ProbeSettle) {
-		m.stopTunnel()
-		return ctx.Err()
-	}
-
-	var lastErr error
-	for i := 0; i < m.cfg.InitialProbeTries; i++ {
-		probeErr := m.prober.Check(ctx)
-		if probeErr == nil {
-			m.setState(StateConnected, n.HostName)
-			logx.Info("tunnel healthy", "host", n.HostName, "remote", n.RemoteAddr())
-			return nil
-		}
-		lastErr = probeErr
-		logx.Warn("initial probe failed", "host", n.HostName, "try", i+1, "err", probeErr)
-		if !sleepCtx(ctx, m.cfg.ProbeInterval) {
-			_ = tun.Stop()
-			return ctx.Err()
-		}
-	}
-	m.stopTunnel()
-	return fmt.Errorf("initial probe degraded: %v", lastErr)
 }
 
 func (m *Manager) stopTunnel() {

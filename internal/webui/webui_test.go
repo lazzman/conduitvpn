@@ -612,3 +612,53 @@ func TestEmbeddedNodePurityUI(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeNodeStripsConfig(t *testing.T) {
+	n := &node.Node{HostName: "vpn-1", ConfigText: "SECRET-PROFILE"}
+	got := sanitizeNode(n)
+	if got == nil || got.ConfigText != "" {
+		t.Fatalf("config not stripped: %+v", got)
+	}
+	if n.ConfigText != "SECRET-PROFILE" {
+		t.Fatal("sanitizeNode mutated the original node")
+	}
+}
+
+func TestAPIStateIncludesTargetNode(t *testing.T) {
+	s := testServer(t, false)
+	w := httptest.NewRecorder()
+	s.apiState(w, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	body := w.Body.String()
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, body)
+	}
+	if !strings.Contains(body, `"target_node"`) {
+		t.Fatalf("target_node missing: %s", body)
+	}
+}
+
+func TestEmbeddedSwitchHintUI(t *testing.T) {
+	page, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), `id="switch-hint"`) {
+		t.Fatal("index.html missing switch-hint")
+	}
+	app, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"target_node", "card.switching"} {
+		if !strings.Contains(string(app), want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+	i18n, err := staticFS.ReadFile("static/i18n.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(i18n), `"card.switching"`) < 3 {
+		t.Fatal("i18n.js missing card.switching in all languages")
+	}
+}
