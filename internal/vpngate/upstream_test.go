@@ -28,6 +28,24 @@ func TestClientRejectsHTTPRedirects(t *testing.T) {
 	}
 }
 
+func TestClientDoesNotRequestGzipCompression(t *testing.T) {
+	var acceptEncoding string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acceptEncoding = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("*vpn_servers\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(nil, time.Second)
+	if _, err := client.Fetch(context.Background(), server.URL); err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if strings.Contains(acceptEncoding, "gzip") {
+		t.Fatalf("Accept-Encoding = %q, must not request gzip from legacy mirrors", acceptEncoding)
+	}
+}
+
 // fakeSocks5Server implements just enough SOCKS5 to validate the client's
 // wire behavior: greeting → (auth) → CONNECT request → reply.
 type fakeSocks5Server struct {

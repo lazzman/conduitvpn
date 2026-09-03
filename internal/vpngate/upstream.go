@@ -29,6 +29,10 @@ func NewClient(upstream *config.UpstreamProxy, timeout time.Duration) *Client {
 		DialContext:           (&net.Dialer{Timeout: timeout}).DialContext,
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,
+		// VPNGate mirrors are backed by a few legacy IIS deployments that
+		// advertise gzip but send an invalid chunked response. Keep the
+		// payload uncompressed so the client can reliably consume the CSV.
+		DisableCompression: true,
 	}
 	if upstream != nil {
 		switch upstream.Type {
