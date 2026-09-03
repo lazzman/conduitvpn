@@ -685,6 +685,23 @@ td.lat-dead { color: var(--text-3); }
 .blacklist-result.passed { color: var(--accent-glow); }
 .blacklist-result.failed, .blacklist-result.skipped { color: var(--error); }
 
+/* ---- VPNGate source dialog ---- */
+.sources-dialog { width: min(760px, calc(100vw - 28px)); overflow: auto; }
+.sources-body { display: grid; gap: 8px; padding: 16px 18px 4px; }
+.source-label { color: var(--text-3); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+.source-official { width: 100%; color: var(--text-2); background: var(--surface-2); }
+.sources-text { width: 100%; min-height: 170px; resize: vertical; font: 11.5px/1.55 var(--mono); color: var(--text); background: var(--surface-2); }
+.source-msg { min-height: 1.1em; color: var(--accent); font-size: 11.5px; }
+.source-msg.err { color: var(--error); }
+.source-status { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface-2); font-size: 11px; color: var(--text-2); }
+.source-status > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; }
+.source-status strong { min-width: 0; overflow: hidden; color: var(--text); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.source-attempt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-attempt.ok { color: var(--accent-glow); }
+.source-attempt.failed { color: var(--warn); }
+.sources-actions { align-items: center; }
+.sources-actions .source-msg { flex: 1; }
+
 /* ---- responsive ---- */
 @media (max-width: 900px) {
   .cards { grid-template-columns: repeat(2, 1fr); }
@@ -704,4 +721,5 @@ td.lat-dead { color: var(--text-3); }
   .pill #status-text { display: none; }
   .login-controls { top: 12px; right: 12px; }
   .dialog-actions { flex-wrap: wrap; }
+  .source-status > div { grid-template-columns: 1fr; gap: 1px; }
 }

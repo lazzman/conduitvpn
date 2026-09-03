@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"conduitvpn/internal/benchmark"
 	"conduitvpn/internal/config"
 	"conduitvpn/internal/egress"
 	"conduitvpn/internal/health"
@@ -64,11 +63,28 @@ type Manager struct {
 	fetchUpstream *config.UpstreamProxy
 	upstreamRT    *upstream.Runtime
 
-	startedAt   time.Time
-	refreshCh   chan struct{}
-	refreshReq  atomic.Bool
-	demo        bool
-	demoRefresh uint32
+	// VPNGate source configuration and ephemeral refresh status.
+	sourceMu     sync.Mutex
+	mirrors      []string
+	sourceStatus VPNGateSourceStatus
+	// mirrorValidator is injectable for deterministic manager tests; the
+	// production default is vpngate.ValidateMirrorOrigin.
+	mirrorValidator func(context.Context, string) error
+	refreshMu       sync.Mutex
+
+	// The latest benchmarked pool can be replaced while the current tunnel is
+	// being monitored. Readers always receive a snapshot of the slice.
+	candidateMu   sync.RWMutex
+	candidatePool []*node.Node
+	candidateCh   chan struct{}
+
+	startedAt        time.Time
+	refreshCh        chan struct{}
+	refreshPendingMu sync.Mutex
+	refreshSeq       uint64
+	refreshConsumed  uint64
+	demo             bool
+	demoRefresh      uint32
 }
 
 // errModeChanged aborts the current connect/monitor cycle so the loop
@@ -127,14 +143,18 @@ func New(cfg config.Config) *Manager {
 		egress:       egressCtl,
 		state:        StateIdle,
 		blacklist:    map[string]state.BlacklistEntry{},
+		sourceStatus: VPNGateSourceStatus{Mirrors: []string{}, Attempts: []VPNGateSourceAttempt{}},
 		taskCtx:      context.Background(),
 		startedAt:    time.Now(),
 		refreshCh:    make(chan struct{}, 1),
+		candidateCh:  make(chan struct{}, 1),
 		modeCh:       make(chan struct{}, 1),
 		routeMode:    cfg.RouteMode,
 		routeCountry: cfg.RouteCountry,
 		routeNode:    cfg.RouteNode,
 	}
+	m.mirrorValidator = vpngate.ValidateMirrorOrigin
+	m.loadVPNGateSources()
 	m.blacklistVerifier = m.verifyBlacklistedNode
 	// Persisted route config (set via the web UI) wins over env defaults.
 	if r, err := m.store.LoadRoute(); err == nil && r.Mode != "" {
@@ -165,7 +185,7 @@ func (m *Manager) Snapshot() Snapshot {
 	s := Snapshot{
 		State:          string(m.state),
 		Detail:         m.stateDetail,
-		CurrentNode:    m.current,
+		CurrentNode:    cloneNode(m.current),
 		BlacklistCount: len(m.blacklist),
 		UptimeSec:      int64(time.Since(m.startedAt).Seconds()),
 	}
@@ -181,12 +201,7 @@ func (m *Manager) TriggerFetch() {
 		m.refreshDemoNodes()
 		return
 	}
-	if !m.refreshReq.Swap(true) {
-		select {
-		case m.refreshCh <- struct{}{}:
-		default:
-		}
-	}
+	m.requestRefresh()
 }
 
 func (m *Manager) refreshDemoNodes() {
@@ -195,6 +210,7 @@ func (m *Manager) refreshDemoNodes() {
 	if err := m.store.SaveNodes(nodes); err != nil {
 		logx.Warn("save demo nodes failed", "err", err)
 	}
+	m.setCandidatePool(nodes)
 	m.updateDemoCurrent(nodes)
 	logx.Info("demo nodes refreshed", "count", len(nodes))
 }
@@ -226,9 +242,14 @@ func demoNodes(refresh uint32) []*node.Node {
 
 // Run is the supervisor loop. It blocks until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) error {
+	ctx = nonNilContext(ctx)
 	m.mu.Lock()
 	m.taskCtx = ctx
 	m.mu.Unlock()
+	if m.demo {
+		<-ctx.Done()
+		return nil
+	}
 	// Resolve the effective upstream: sing-box sources take precedence
 	// over the legacy OPENVPN_UPSTREAM_*/BO_* envs.
 	proxy, rt, err := upstream.Start(ctx, &m.cfg, m.cfg.DataDir)
@@ -243,29 +264,39 @@ func (m *Manager) Run(ctx context.Context) error {
 	if m.fetchUpstream != nil {
 		logx.Info("using upstream proxy for node fetch", "type", m.fetchUpstream.Type, "addr", m.fetchUpstream.Addr)
 	}
+	// The first fetch remains synchronous so startup has a candidate pool
+	// before the tunnel selection loop begins. Later refreshes are independent
+	// of the connected tunnel and run in the background.
+	nodes := m.fetchAndBench(ctx)
+	if ctx.Err() != nil {
+		return nil
+	}
+	m.drainCandidateSignals()
+	go m.refreshLoop(ctx)
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		m.refreshReq.Store(false) // consume any pending refresh request
-		nodes := m.fetchAndBench(ctx)
-		if ctx.Err() != nil {
-			return nil
+		if len(nodes) == 0 {
+			nodes = m.candidateSnapshot()
 		}
 		if len(nodes) == 0 {
-			logx.Warn("no candidate nodes available; retrying in 30s")
-			if !m.wait(ctx, 30*time.Second) {
+			logx.Warn("no candidate nodes available; waiting for the next refresh")
+			m.requestRefresh()
+			if !m.wait(ctx, m.refreshInterval()) && ctx.Err() != nil {
 				return nil
 			}
+			nodes = m.candidateSnapshot()
 			continue
 		}
 		candidates := m.selectCandidates(nodes)
 		if len(candidates) == 0 {
 			mode, country, node := m.routeConfig()
 			logx.Error("no candidates for current route mode", "mode", mode, "country", country, "node", node)
-			if !m.wait(ctx, 20*time.Second) {
+			if !m.wait(ctx, m.refreshInterval()) && ctx.Err() != nil {
 				return nil
 			}
+			nodes = m.candidateSnapshot()
 			continue
 		}
 		err := m.connectLoop(ctx, candidates)
@@ -274,12 +305,32 @@ func (m *Manager) Run(ctx context.Context) error {
 		}
 		if errors.Is(err, errModeChanged) {
 			logx.Info("route mode changed; re-evaluating candidates")
+			nodes = m.candidateSnapshot()
 			continue
 		}
 		m.setState(StateDrifting, "all candidates exhausted")
 		logx.Error("connect loop exhausted candidates", "err", err)
-		if !m.wait(ctx, 15*time.Second) {
+		m.requestRefresh()
+		if !m.wait(ctx, m.refreshInterval()) && ctx.Err() != nil {
 			return nil
+		}
+		nodes = m.candidateSnapshot()
+	}
+}
+
+func (m *Manager) refreshInterval() time.Duration {
+	if m.cfg.FetchInterval > 0 {
+		return m.cfg.FetchInterval
+	}
+	return 1260 * time.Second
+}
+
+func (m *Manager) drainCandidateSignals() {
+	for {
+		select {
+		case <-m.candidateCh:
+		default:
+			return
 		}
 	}
 }
@@ -288,32 +339,7 @@ func (m *Manager) Run(ctx context.Context) error {
 // back to the last persisted node list so a transient outage does not
 // kill the daemon.
 func (m *Manager) fetchAndBench(ctx context.Context) []*node.Node {
-	m.setState(StateFetching, "")
-	client := vpngate.NewClient(m.fetchUpstream, m.cfg.FetchTimeout)
-	raw, err := client.Fetch(ctx, m.cfg.APIURL)
-	if err != nil {
-		logx.Warn("fetch failed; falling back to cached nodes", "err", err)
-		cached, cerr := m.store.LoadNodes()
-		if cerr != nil || len(cached) == 0 {
-			return nil
-		}
-		return cached
-	}
-	nodes, err := vpngate.Parse(raw)
-	if err != nil {
-		logx.Error("parse failed", "err", err)
-		return nil
-	}
-	candidates := node.SortByScore(nodes)
-	if len(candidates) > m.cfg.MaxScanRows {
-		candidates = candidates[:m.cfg.MaxScanRows]
-	}
-	logx.Info("benchmarking candidates", "count", len(candidates))
-	benchmark.Run(ctx, candidates, m.cfg.BenchConcurrency, m.cfg.BenchTimeout)
-	if err := m.store.SaveNodes(candidates); err != nil {
-		logx.Warn("save nodes failed", "err", err)
-	}
-	return candidates
+	return m.refreshNodes(ctx, true)
 }
 
 // connectLoop tries nodes best-first until one connects and stays
@@ -321,16 +347,31 @@ func (m *Manager) fetchAndBench(ctx context.Context) []*node.Node {
 // The fixed-mode node is never blacklisted (it is the user's explicit
 // lock choice).
 func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
-	for _, n := range nodes {
+	attempted := make(map[string]bool)
+	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		var n *node.Node
+		for _, candidate := range nodes {
+			if candidate != nil && !attempted[candidateKey(candidate)] {
+				n = candidate
+				break
+			}
+		}
+		if n == nil {
+			return errors.New("all candidates exhausted")
+		}
+		attempted[candidateKey(n)] = true
 		if m.isBlacklisted(n) && !m.isFixedNode(n) {
 			continue
 		}
 		if err := m.connectAndVerify(ctx, n); err != nil {
 			logx.Warn("node failed", "host", n.HostName, "err", err)
 			m.markBlacklisted(n, err.Error())
+			if latest := m.candidateSnapshot(); len(latest) > 0 {
+				nodes = m.selectCandidates(latest)
+			}
 			continue
 		}
 		err := m.monitor(ctx, n)
@@ -341,18 +382,32 @@ func (m *Manager) connectLoop(ctx context.Context, nodes []*node.Node) error {
 			}
 			logx.Warn("node degraded, drifting", "host", n.HostName, "err", err)
 			m.markBlacklisted(n, err.Error())
+			if latest := m.candidateSnapshot(); len(latest) > 0 {
+				nodes = m.selectCandidates(latest)
+			}
 			continue
 		}
 		return ctx.Err()
 	}
-	return errors.New("all candidates exhausted")
+}
+
+func candidateKey(n *node.Node) string {
+	if n == nil {
+		return ""
+	}
+	if n.HostName != "" {
+		return "host:" + n.HostName
+	}
+	return fmt.Sprintf("node:%s:%d:%s", n.IP, n.RemotePort, n.RemoteProto)
 }
 
 // connectAndVerify spawns openvpn, waits for the handshake, lets the
 // tunnel settle, then confirms egress with the HTTPS probe.
 func (m *Manager) connectAndVerify(ctx context.Context, n *node.Node) error {
 	m.setState(StateConnecting, n.HostName)
+	m.mu.Lock()
 	m.current = n
+	m.mu.Unlock()
 
 	cfgPath, authPath, err := m.prepareFiles(n)
 	if err != nil {
@@ -795,20 +850,26 @@ func (m *Manager) selectCandidates(nodes []*node.Node) []*node.Node {
 		}
 		var out []*node.Node
 		for _, n := range nodes {
-			if wanted[strings.ToUpper(n.CountryShort)] {
+			if n != nil && wanted[strings.ToUpper(n.CountryShort)] {
 				out = append(out, n)
 			}
 		}
 		return out
 	case "fixed":
 		for _, n := range nodes {
-			if n.HostName == fixed || n.IP == fixed {
+			if n != nil && (n.HostName == fixed || n.IP == fixed) {
 				return []*node.Node{n}
 			}
 		}
 		return nil
 	default:
-		return nodes
+		out := make([]*node.Node, 0, len(nodes))
+		for _, n := range nodes {
+			if n != nil {
+				out = append(out, n)
+			}
+		}
+		return out
 	}
 }
 
@@ -871,13 +932,17 @@ func (m *Manager) SetRouteConfig(mode, country, node string) error {
 	return nil
 }
 
-// wait sleeps d unless the context dies or a refresh is requested.
-// Returns false when the loop should restart early.
+// wait sleeps d unless the context dies or a background refresh publishes a
+// replacement candidate pool.
 func (m *Manager) wait(ctx context.Context, d time.Duration) bool {
+	ctx = nonNilContext(ctx)
+	if d < 0 {
+		d = 0
+	}
 	select {
 	case <-ctx.Done():
 		return false
-	case <-m.refreshCh:
+	case <-m.candidateCh:
 		return false
 	case <-time.After(d):
 		return true

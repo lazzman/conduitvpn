@@ -2,10 +2,62 @@ package state
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 )
+
+func TestVPNGateSourcesRoundTripAndPermissions(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	origins := []string{"http://one.example", "https://two.example:8443"}
+	if err := s.SaveVPNGateSources(VPNGateSources{Mirrors: origins}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadVPNGateSources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Mirrors) != len(origins) || got.Mirrors[0] != origins[0] || got.Mirrors[1] != origins[1] {
+		t.Fatalf("sources = %#v, want %#v", got.Mirrors, origins)
+	}
+	info, err := os.Stat(s.VPNGateSourcesPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("sources mode = %o, want 600", got)
+	}
+
+	// A fresh Store instance reads the same persisted configuration.
+	restarted, err := NewStore(dir).LoadVPNGateSources()
+	if err != nil || len(restarted.Mirrors) != 2 {
+		t.Fatalf("restarted sources = %#v, err=%v", restarted, err)
+	}
+}
+
+func TestVPNGateSourcesEmptyListIsStableJSONArray(t *testing.T) {
+	s := NewStore(t.TempDir())
+	if err := s.SaveVPNGateSources(VPNGateSources{}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(s.VPNGateSourcesPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if string(raw["mirrors"]) != "[]" {
+		t.Fatalf("persisted mirrors = %s, want []", raw["mirrors"])
+	}
+	got, err := s.LoadVPNGateSources()
+	if err != nil || got.Mirrors == nil {
+		t.Fatalf("loaded empty mirrors = %#v, err=%v; want non-nil empty slice", got.Mirrors, err)
+	}
+}
 
 func TestEnsureAuthGeneratesCreds(t *testing.T) {
 	s := NewStore(t.TempDir())

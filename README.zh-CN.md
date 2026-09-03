@@ -17,6 +17,7 @@
 ## 核心能力
 
 - **节点生命周期管理**：拉取 VPNGate 节点、并发测速、选择合格路由，并监督 OpenVPN 经历连接、探测和稳定状态。
+- **VPNGate 来源容错**：可在管理后台配置镜像 origin；每轮先尝试官方源，再按顺序尝试镜像，来源暂时不可用时保留现有节点缓存。
 - **路由控制**：支持智能自动漂移、按一个或多个国家地区筛选，以及固定单节点持续重试。
 - **单端口本地代理**：HTTP 和 SOCKS5 共用 `7928`；DNS、TCP 代理流量、健康探测和实时延迟测量均经由隧道。
 - **双网络模式**：Docker 中使用全隧道路由；Linux/macOS 宿主机中使用受控 socket 路由。
@@ -138,7 +139,7 @@ docker run -d --name conduitvpn \
 | 分组 | 变量 |
 | --- | --- |
 | 运行时 | `NETWORK_MODE`、`CONDUIT_DATA_DIR`、`--data-dir`、`LOG_LEVEL` |
-| 节点来源与测速 | `VPNGATE_API_URL`、`FETCH_TIMEOUT_SECONDS`、`FETCH_INTERVAL_SECONDS`、`TARGET_VALID_NODES`、`MAX_SCAN_ROWS`、`BENCH_CONCURRENCY`、`BENCH_TIMEOUT_SECONDS` |
+| 节点来源与测速 | `VPNGATE_API_URL`、`FETCH_TIMEOUT_SECONDS`、`FETCH_INTERVAL_SECONDS`、`TARGET_VALID_NODES`、`MAX_SCAN_ROWS`、`BENCH_CONCURRENCY`、`BENCH_TIMEOUT_SECONDS`；镜像 origin 通过 Web 管理后台配置 |
 | 隧道与健康探测 | `CONNECT_TIMEOUT_SECONDS`、`PROBE_SETTLE_SECONDS`、`PROBE_INTERVAL_SECONDS`、`PROBE_TIMEOUT_SECONDS`、`INITIAL_PROBE_TRIES`、`HEALTH_MAX_FAILS`、`HEALTH_ADDR`、`OPENVPN_AUTH_USER`、`OPENVPN_AUTH_PASS` |
 | 路由 | `ROUTE_MODE`、`ROUTE_COUNTRY`、`ROUTE_NODE`、`LATENCY_INTERVAL_SECONDS` |
 | 本地代理 | `LOCAL_PROXY_HOST`、`LOCAL_PROXY_PORT`、`LOCAL_PROXY_USER`、`LOCAL_PROXY_PASS`、`LOCAL_PROXY_MAX_CONNECTIONS`、`DNS_SERVER` |
@@ -148,9 +149,22 @@ docker run -d --name conduitvpn \
 
 节点拉取可使用 HTTP/SOCKS5 上游、sing-box 单节点 URI（`vmess://`、`vless://`、`trojan://`、`ss://`、`hy2://`），或 v2ray base64、纯文本、sing-box JSON 订阅。订阅仅在启动时拉取一次。
 
-### 路由 API
+### 管理 API
 
 全部 API 以 `/<secret>` 为前缀。节点响应经过脱敏，不包含 OpenVPN 配置、证书或私钥。
+
+#### VPNGate 镜像
+
+点击管理后台顶部的齿轮图标打开 **VPNGate 镜像**，可直接粘贴从网页复制的镜像列表。前端会提取明确的 `http://` 或 `https://` 地址，去掉 `/cn/` 等路径、重复项，并整理为一行一个 origin。服务端会再次解析并校验 DNS，拒绝回环、私网、链路本地、保留、多播和无法解析的目标。原始文本上限为 16 KiB，镜像数量上限为 64 条。
+
+`VPNGATE_API_URL` 仍是官方完整 API 地址，每轮始终优先请求它。镜像保存为 `scheme://host[:port]`，请求时统一追加 `scheme://host[:port]/api/iphone/`，且禁止 HTTP 重定向。只有 HTTP 200 且成功解析出至少一个有效节点的来源才算成功；整轮失败时不会中断当前隧道，也不会覆盖旧候选缓存。周期刷新使用 `FETCH_INTERVAL_SECONDS`，手动刷新和保存配置会在进行中的刷新期间合并为下一轮请求。
+
+镜像列表保存于数据目录中的 `vpngate_sources.json`（权限 `0600`）。来源运行状态仅保存在内存，可通过以下认证接口查看：
+
+| 端点 | 方法 | 用途 |
+| --- | --- | --- |
+| `/api/vpngate-sources` | `GET` | 查看官方源、镜像列表、最近成功来源、时间、尝试明细和刷新状态 |
+| `/api/vpngate-sources` | `PUT` | 使用 `{ "text": "..." }` 整体替换镜像；空字符串清空列表。响应包含规范化后的 `mirrors`、`issues` 和 `ignored_count` |
 
 | 端点 | 方法 | 用途 |
 | --- | --- | --- |

@@ -4,17 +4,36 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
+func TestClientRejectsHTTPRedirects(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("redirect target"))
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	client := NewClient(nil, time.Second)
+	_, err := client.Fetch(context.Background(), server.URL)
+	if err == nil || !strings.Contains(err.Error(), "unexpected status 307") {
+		t.Fatalf("redirect fetch error = %v, want status 307", err)
+	}
+}
+
 // fakeSocks5Server implements just enough SOCKS5 to validate the client's
 // wire behavior: greeting → (auth) → CONNECT request → reply.
 type fakeSocks5Server struct {
-	ln      net.Listener
-	mu      sync.Mutex
-	targets []string // recorded CONNECT targets
+	ln          net.Listener
+	mu          sync.Mutex
+	targets     []string // recorded CONNECT targets
 	requireAuth bool
 }
 

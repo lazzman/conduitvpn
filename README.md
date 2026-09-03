@@ -17,6 +17,7 @@ It is a clean-room Go rewrite of the GPL-3.0 Python project aimili-vpngate. The 
 ## Why ConduitVPN
 
 - **Managed node lifecycle** - Fetches VPNGate nodes, benchmarks them concurrently, chooses eligible routes, and supervises OpenVPN through connection, probing, and stable states.
+- **Resilient VPNGate sources** - Configure mirror origins from the management console; the official source is tried first, then mirrors in order, with cached nodes retained during an outage.
 - **Route control** - Use automatic failover, restrict selection to one or more countries, or keep retrying one fixed node.
 - **One local proxy port** - HTTP and SOCKS5 share port `7928`; DNS, TCP proxy traffic, health checks, and latency measurements use the tunnel route.
 - **Two operating modes** - Full tunnel routing in Docker, or controlled socket routing on Linux and macOS hosts.
@@ -138,7 +139,7 @@ Add `-p 0.0.0.0:7929:7929/udp -e HY2_PORT=7929 -e HY2_PASSWORD='a-third-long-ran
 | Group | Variables |
 | --- | --- |
 | Runtime | `NETWORK_MODE`, `CONDUIT_DATA_DIR`, `--data-dir`, `LOG_LEVEL` |
-| Node source and benchmark | `VPNGATE_API_URL`, `FETCH_TIMEOUT_SECONDS`, `FETCH_INTERVAL_SECONDS`, `TARGET_VALID_NODES`, `MAX_SCAN_ROWS`, `BENCH_CONCURRENCY`, `BENCH_TIMEOUT_SECONDS` |
+| Node source and benchmark | `VPNGATE_API_URL`, `FETCH_TIMEOUT_SECONDS`, `FETCH_INTERVAL_SECONDS`, `TARGET_VALID_NODES`, `MAX_SCAN_ROWS`, `BENCH_CONCURRENCY`, `BENCH_TIMEOUT_SECONDS`; mirror origins are managed through the Web console |
 | Tunnel and health | `CONNECT_TIMEOUT_SECONDS`, `PROBE_SETTLE_SECONDS`, `PROBE_INTERVAL_SECONDS`, `PROBE_TIMEOUT_SECONDS`, `INITIAL_PROBE_TRIES`, `HEALTH_MAX_FAILS`, `HEALTH_ADDR`, `OPENVPN_AUTH_USER`, `OPENVPN_AUTH_PASS` |
 | Routes | `ROUTE_MODE`, `ROUTE_COUNTRY`, `ROUTE_NODE`, `LATENCY_INTERVAL_SECONDS` |
 | Local proxy | `LOCAL_PROXY_HOST`, `LOCAL_PROXY_PORT`, `LOCAL_PROXY_USER`, `LOCAL_PROXY_PASS`, `LOCAL_PROXY_MAX_CONNECTIONS`, `DNS_SERVER` |
@@ -148,9 +149,22 @@ Add `-p 0.0.0.0:7929:7929/udp -e HY2_PORT=7929 -e HY2_PASSWORD='a-third-long-ran
 
 The fetch upstream accepts HTTP/SOCKS5 proxies, a sing-box URI (`vmess://`, `vless://`, `trojan://`, `ss://`, or `hy2://`), or a v2ray-base64, plain-text, or sing-box JSON subscription. A subscription is fetched once at startup.
 
-### Route API
+### Management API
 
 All API routes are prefixed by `/<secret>`. Node responses exclude OpenVPN configuration material, including certificates and private keys.
+
+#### VPNGate mirrors
+
+Open **VPNGate sources** from the gear icon in the console and paste mirror listings copied from a web page. The UI extracts explicit `http://` and `https://` URLs, removes paths such as `/cn/`, strips duplicates, and writes one origin per line. The server repeats parsing and validates DNS answers, rejecting loopback, private, link-local, reserved, multicast, and unresolved targets. At most 64 mirrors and 16 KiB of source text are accepted.
+
+`VPNGATE_API_URL` remains the official, complete API URL and is always requested first. A configured mirror is stored as `scheme://host[:port]` and requested as `scheme://host[:port]/api/iphone/`; redirects are rejected. A source counts as successful only after an HTTP 200 response and at least one valid parsed node. A failed round leaves the current tunnel and previous candidate cache untouched. Periodic refreshes use `FETCH_INTERVAL_SECONDS`; manual refresh and configuration saves are coalesced while one refresh is running.
+
+The mirror list persists in `vpngate_sources.json` in the data directory (mode `0600`). Runtime source status is in memory and is exposed by the authenticated endpoint below:
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/vpngate-sources` | `GET` | Read the official URL, mirror list, current successful source, timestamps, latest attempts, and refresh state |
+| `/api/vpngate-sources` | `PUT` | Replace mirrors from `{ "text": "..." }`; an empty string clears the list. The response includes normalized `mirrors`, `issues`, and `ignored_count` |
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |

@@ -2,8 +2,14 @@ package manager
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +18,388 @@ import (
 	"conduitvpn/internal/node"
 	"conduitvpn/internal/state"
 )
+
+func managerTestVPNGateCSV(host string) []byte {
+	profile := "client\ndev tun\nproto udp\nremote 8.8.8.8 1194 udp\nresolv-retry infinite\nnobind\npersist-key\npersist-tun\nauth-nocache\nremote-cert-tls server\ncipher AES-256-GCM\nauth SHA256\nverb 3\n"
+	encoded := base64.StdEncoding.EncodeToString([]byte(profile))
+	return []byte(fmt.Sprintf("*vpn_servers\n#HostName,IP,Score,Ping,Speed,CountryLong,CountryShort,NumVpnSessions,Uptime,LogType,Operator,Message,OpenVPN_ConfigData_Base64\n%s,8.8.8.8,9000,20,1000000,Japan,JP,1,100,OpenVPN,Test,,%s\n*END\n", host, encoded))
+}
+
+func managerSourceTestConfig(t *testing.T, officialURL string) *Manager {
+	t.Helper()
+	cfg := config.Config{
+		DataDir:          t.TempDir(),
+		APIURL:           officialURL,
+		FetchTimeout:     time.Second,
+		FetchInterval:    20 * time.Millisecond,
+		MaxScanRows:      10,
+		BenchConcurrency: 1,
+		BenchTimeout:     time.Millisecond,
+	}
+	m := New(cfg)
+	m.mirrorValidator = func(context.Context, string) error { return nil }
+	return m
+}
+
+func TestRefreshSourcesOfficialThenMirrorFallback(t *testing.T) {
+	var pathsMu sync.Mutex
+	var paths []string
+	official := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pathsMu.Lock()
+		paths = append(paths, "official:"+r.URL.Path)
+		pathsMu.Unlock()
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+	}))
+	defer official.Close()
+	mirrorBad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pathsMu.Lock()
+		paths = append(paths, "bad:"+r.URL.Path)
+		pathsMu.Unlock()
+		_, _ = w.Write([]byte("not csv"))
+	}))
+	defer mirrorBad.Close()
+	mirrorGood := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pathsMu.Lock()
+		paths = append(paths, "good:"+r.URL.Path)
+		pathsMu.Unlock()
+		_, _ = w.Write(managerTestVPNGateCSV("mirror-good"))
+	}))
+	defer mirrorGood.Close()
+
+	m := managerSourceTestConfig(t, official.URL)
+	m.mirrors = []string{mirrorBad.URL, mirrorGood.URL}
+	got := m.refreshNodes(context.Background(), true)
+	if len(got) != 1 || got[0].HostName != "mirror-good" {
+		t.Fatalf("nodes = %#v, want mirror-good", got)
+	}
+	status := m.VPNGateSourceStatus()
+	if status.CurrentSource != mirrorGood.URL+mirrorAPIPath || len(status.Attempts) != 3 {
+		t.Fatalf("source status = %+v", status)
+	}
+	if !status.Attempts[2].OK || status.Attempts[0].OK || status.Attempts[1].OK {
+		t.Fatalf("attempts = %#v", status.Attempts)
+	}
+	pathsMu.Lock()
+	gotPaths := append([]string{}, paths...)
+	pathsMu.Unlock()
+	wantPaths := []string{"official:/", "bad:" + mirrorAPIPath, "good:" + mirrorAPIPath}
+	if strings.Join(gotPaths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("request order = %#v, want %#v", gotPaths, wantPaths)
+	}
+	if status.Refreshing {
+		t.Fatal("refreshing remained true after refresh")
+	}
+}
+
+func TestMirrorEndpointAlwaysUsesVPNGateAPIPath(t *testing.T) {
+	if got := mirrorEndpoint("HTTP://Example.com:80/cn/"); got != "http://example.com/api/iphone/" {
+		t.Fatalf("mirror endpoint = %q", got)
+	}
+}
+
+func TestRefreshSourcesStopsAfterOfficialSuccess(t *testing.T) {
+	var mirrorRequests int
+	official := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(managerTestVPNGateCSV("official-node"))
+	}))
+	defer official.Close()
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mirrorRequests++
+		_, _ = w.Write(managerTestVPNGateCSV("mirror-node"))
+	}))
+	defer mirror.Close()
+	m := managerSourceTestConfig(t, official.URL)
+	m.mirrors = []string{mirror.URL}
+	got := m.refreshNodes(context.Background(), false)
+	if len(got) != 1 || got[0].HostName != "official-node" {
+		t.Fatalf("nodes = %#v, want official-node", got)
+	}
+	if mirrorRequests != 0 {
+		t.Fatalf("mirror requests = %d, want 0 after official success", mirrorRequests)
+	}
+	status := m.VPNGateSourceStatus()
+	if len(status.Attempts) != 1 || !status.Attempts[0].OK || status.CurrentSource != official.URL {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestForegroundRefreshDoesNotLeaveConnectedStateFetching(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(managerTestVPNGateCSV("connected-refresh"))
+	}))
+	defer server.Close()
+	m := managerSourceTestConfig(t, server.URL)
+	m.setState(StateConnected, "existing-node")
+	if got := m.refreshNodes(context.Background(), true); len(got) != 1 {
+		t.Fatalf("refresh nodes = %#v", got)
+	}
+	if snap := m.Snapshot(); snap.State != string(StateConnected) {
+		t.Fatalf("foreground refresh changed connected state: %+v", snap)
+	}
+}
+
+func TestSourceStatusReportsRefreshingDuringNetworkRound(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		_, _ = w.Write(managerTestVPNGateCSV("blocked-refresh"))
+	}))
+	defer server.Close()
+	m := managerSourceTestConfig(t, server.URL)
+	done := make(chan struct{})
+	go func() {
+		m.refreshNodes(context.Background(), false)
+		close(done)
+	}()
+	<-started
+	status := m.VPNGateSourceStatus()
+	if !status.Refreshing || status.Attempts == nil {
+		t.Fatalf("in-flight status = %+v", status)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("refresh did not finish")
+	}
+	if m.VPNGateSourceStatus().Refreshing {
+		t.Fatal("refreshing remained true")
+	}
+}
+
+func TestMirrorConfigChangeAppliesOnNextRefreshRound(t *testing.T) {
+	firstStarted := make(chan struct{})
+	firstRelease := make(chan struct{})
+	var mu sync.Mutex
+	var requests []string
+	official := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.URL.Path)
+		count := len(requests)
+		mu.Unlock()
+		if count == 1 {
+			close(firstStarted)
+			<-firstRelease
+			http.Error(w, "first round failed", http.StatusBadGateway)
+			return
+		}
+		http.Error(w, "official unavailable", http.StatusBadGateway)
+	}))
+	defer official.Close()
+	oldMirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "old mirror should be used only in first round", http.StatusBadGateway)
+	}))
+	defer oldMirror.Close()
+	newMirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, "new:"+r.URL.Path)
+		mu.Unlock()
+		_, _ = w.Write(managerTestVPNGateCSV("new-mirror"))
+	}))
+	defer newMirror.Close()
+	m := managerSourceTestConfig(t, official.URL)
+	m.mirrors = []string{oldMirror.URL}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		m.refreshLoop(ctx)
+		close(done)
+	}()
+	m.requestRefresh()
+	<-firstStarted
+	if _, err := m.SetVPNGateMirrors(ctx, newMirror.URL); err != nil {
+		t.Fatal(err)
+	}
+	close(firstRelease)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		found := false
+		for _, path := range requests {
+			if path == "new:"+mirrorAPIPath {
+				found = true
+			}
+		}
+		mu.Unlock()
+		if found {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	gotRequests := append([]string{}, requests...)
+	mu.Unlock()
+	cancel()
+	<-done
+	if len(gotRequests) < 2 || !strings.Contains(strings.Join(gotRequests, "\n"), "new:"+mirrorAPIPath) {
+		t.Fatalf("requests = %#v, expected next-round new mirror", gotRequests)
+	}
+}
+
+func TestRefreshRejectsRedirectAndPreservesCandidatePool(t *testing.T) {
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(managerTestVPNGateCSV("redirect-target"))
+	}))
+	defer redirectTarget.Close()
+	official := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, redirectTarget.URL, http.StatusFound)
+	}))
+	defer official.Close()
+	m := managerSourceTestConfig(t, official.URL)
+	old := []*node.Node{{HostName: "cached-node", IP: "8.8.8.8"}}
+	m.setCandidatePool(old)
+	m.setState(StateConnected, "cached-node")
+	got := m.refreshNodes(context.Background(), false)
+	if len(got) != 1 || got[0].HostName != "cached-node" {
+		t.Fatalf("fallback nodes = %#v", got)
+	}
+	if pool := m.candidateSnapshot(); len(pool) != 1 || pool[0].HostName != "cached-node" {
+		t.Fatalf("candidate pool was replaced: %#v", pool)
+	}
+	if snap := m.Snapshot(); snap.State != string(StateConnected) {
+		t.Fatalf("state changed during background failure: %+v", snap)
+	}
+	status := m.VPNGateSourceStatus()
+	if len(status.Attempts) != 1 || status.Attempts[0].OK || !strings.Contains(status.Attempts[0].Error, "unexpected status 302") {
+		t.Fatalf("redirect attempt = %#v", status.Attempts)
+	}
+}
+
+func TestRefreshRequestSequenceCoalescesAndDoesNotLosePending(t *testing.T) {
+	m := testManager(t, "auto", "", "")
+	m.requestRefresh()
+	m.requestRefresh()
+	if !m.takeRefreshRequest() {
+		t.Fatal("expected pending refresh")
+	}
+	// A request arriving after the first one was consumed must schedule the
+	// next round independently.
+	m.requestRefresh()
+	if !m.takeRefreshRequest() {
+		t.Fatal("pending refresh was lost")
+	}
+	if m.takeRefreshRequest() {
+		t.Fatal("unexpected extra refresh")
+	}
+}
+
+func TestRefreshLoopHonorsTickerAndKeepsConnectedState(t *testing.T) {
+	var requestsMu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestsMu.Lock()
+		requests++
+		requestsMu.Unlock()
+		_, _ = w.Write(managerTestVPNGateCSV("ticker-node"))
+	}))
+	defer server.Close()
+	m := managerSourceTestConfig(t, server.URL)
+	m.cfg.FetchInterval = 15 * time.Millisecond
+	m.setState(StateConnected, "existing-node")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.refreshLoop(ctx)
+		close(done)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		requestsMu.Lock()
+		count := requests
+		requestsMu.Unlock()
+		if count >= 2 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("refresh loop did not stop")
+	}
+	requestsMu.Lock()
+	count := requests
+	requestsMu.Unlock()
+	if count < 2 {
+		t.Fatalf("ticker requests = %d, want at least 2", count)
+	}
+	if snap := m.Snapshot(); snap.State != string(StateConnected) {
+		t.Fatalf("background ticker changed state: %+v", snap)
+	}
+}
+
+func TestVPNGateSourceStatusUsesEmptyArrays(t *testing.T) {
+	m := testManager(t, "auto", "", "")
+	data, err := json.Marshal(m.VPNGateSourceStatus())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"mirrors":[]`) || !strings.Contains(string(data), `"attempts":[]`) {
+		t.Fatalf("status JSON = %s", data)
+	}
+}
+
+func TestSetVPNGateMirrorsPartiallyFiltersDNSFailures(t *testing.T) {
+	m := testManager(t, "auto", "", "")
+	m.mirrorValidator = func(_ context.Context, origin string) error {
+		if strings.Contains(origin, "blocked") {
+			return errors.New("mirror host resolves to non-public IP")
+		}
+		return nil
+	}
+	update, err := m.SetVPNGateMirrors(context.Background(), "http://ok.example/path\nhttp://blocked.example/path")
+	if err != nil {
+		t.Fatalf("partial update failed: %v", err)
+	}
+	if len(update.Mirrors) != 1 || update.Mirrors[0] != "http://ok.example" || len(update.Issues) != 1 {
+		t.Fatalf("update = %+v", update)
+	}
+	status := m.VPNGateSourceStatus()
+	if len(status.Mirrors) != 1 || status.Mirrors[0] != "http://ok.example" {
+		t.Fatalf("saved mirrors = %#v", status.Mirrors)
+	}
+}
+
+func TestSetVPNGateMirrorsAllInvalidLeavesOldConfiguration(t *testing.T) {
+	m := testManager(t, "auto", "", "")
+	m.mirrorValidator = func(context.Context, string) error { return errors.New("DNS failure") }
+	if _, err := m.SetVPNGateMirrors(context.Background(), "http://old.example"); err == nil {
+		t.Fatal("expected all-invalid update to fail")
+	}
+	if _, err := m.SetVPNGateMirrors(context.Background(), "http://new.example"); err == nil {
+		t.Fatal("expected second all-invalid update to fail")
+	}
+	if got := m.VPNGateSourceStatus().Mirrors; len(got) != 0 {
+		t.Fatalf("old configuration unexpectedly changed: %#v", got)
+	}
+}
+
+func TestVPNGateMirrorsReloadAcrossManagerRestart(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{DataDir: dir, Demo: true}
+	m := NewDemo(cfg)
+	if _, err := m.SetVPNGateMirrors(context.Background(), "http://mirror.example/cn/\nhttps://mirror.example:443"); err != nil {
+		t.Fatal(err)
+	}
+	m2 := New(config.Config{DataDir: dir})
+	got := m2.VPNGateSourceStatus().Mirrors
+	want := []string{"http://mirror.example", "https://mirror.example"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("reloaded mirrors = %#v, want %#v", got, want)
+	}
+}
+
+func TestDemoMirrorSaveSkipsNetworkValidation(t *testing.T) {
+	m := NewDemo(config.Config{DataDir: t.TempDir(), Demo: true})
+	update, err := m.SetVPNGateMirrors(context.Background(), "http://127.0.0.1:9/cn/")
+	if err != nil || len(update.Mirrors) != 1 || update.Mirrors[0] != "http://127.0.0.1:9" {
+		t.Fatalf("demo mirror update = %+v, err=%v", update, err)
+	}
+}
 
 func testManager(t *testing.T, mode, country, node string) *Manager {
 	t.Helper()

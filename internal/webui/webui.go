@@ -30,6 +30,7 @@ import (
 	"conduitvpn/internal/manager"
 	"conduitvpn/internal/node"
 	"conduitvpn/internal/state"
+	"conduitvpn/internal/vpngate"
 )
 
 //go:embed static
@@ -76,6 +77,9 @@ const (
 	maxSSEClients    = 32
 	maxLoginFailures = 5
 	loginWindow      = 15 * time.Minute
+	// JSON escaping can expand a 16 KiB UTF-8 source text, so leave room for
+	// the envelope while still bounding malformed requests before decoding.
+	maxSourceRequestBytes = 128 << 10
 )
 
 type loginAttempt struct {
@@ -129,6 +133,7 @@ func (s *Server) Addr() net.Addr     { return s.ln.Addr() }
 func (s *Server) registerAPI() {
 	s.api.HandleFunc("/api/state", s.apiState)
 	s.api.HandleFunc("/api/route", s.apiRoute)
+	s.api.HandleFunc("/api/vpngate-sources", s.apiVPNGateSources)
 	s.api.HandleFunc("/api/nodes", s.apiNodes)
 	s.api.HandleFunc("/api/blacklist", s.apiBlacklist)
 	s.api.HandleFunc("/api/logs", s.apiLogs)
@@ -367,7 +372,11 @@ func (s *Server) securityHeaders(w http.ResponseWriter) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	return decodeJSONLimit(w, r, dst, 8<<10)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -518,13 +527,77 @@ func (s *Server) apiRoute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) apiVPNGateSources(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.mgr.VPNGateSourceStatus())
+	case http.MethodPut:
+		var body struct {
+			Text *string `json:"text"`
+		}
+		if err := decodeJSONLimit(w, r, &body, maxSourceRequestBytes); err != nil {
+			code := "invalid_json"
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				code = "sources_too_large"
+			}
+			writeAPIError(w, http.StatusBadRequest, code, "bad json")
+			return
+		}
+		if body.Text == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok": false, "code": "sources_invalid", "error": "text is required",
+				"issues": []vpngate.MirrorIssue{}, "ignored_count": 0,
+			})
+			return
+		}
+		update, err := s.mgr.SetVPNGateMirrors(r.Context(), *body.Text)
+		if err != nil {
+			if errors.Is(err, manager.ErrVPNGateSourcesSave) {
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+				return
+			}
+			code := "sources_invalid"
+			if errors.Is(err, vpngate.ErrMirrorTextTooLarge) || errors.Is(err, vpngate.ErrMirrorCountTooLarge) {
+				code = "sources_too_large"
+			}
+			issues := update.Issues
+			if issues == nil {
+				issues = []vpngate.MirrorIssue{}
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok": false, "code": code, "error": err.Error(), "mirrors": []string{}, "issues": issues, "ignored_count": len(issues),
+			})
+			return
+		}
+		issues := update.Issues
+		if issues == nil {
+			issues = []vpngate.MirrorIssue{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            true,
+			"mirrors":       update.Mirrors,
+			"issues":        issues,
+			"ignored_count": len(issues),
+		})
+	default:
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or PUT")
+	}
+}
+
 func (s *Server) apiNodes(w http.ResponseWriter, r *http.Request) {
 	nodes, err := s.store.LoadNodes()
 	if err != nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-	writeJSON(w, http.StatusOK, nodes)
+	safe := make([]*node.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if n != nil {
+			safe = append(safe, sanitizeNode(n))
+		}
+	}
+	writeJSON(w, http.StatusOK, safe)
 }
 
 func (s *Server) apiBlacklist(w http.ResponseWriter, r *http.Request) {

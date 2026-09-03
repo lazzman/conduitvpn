@@ -47,7 +47,11 @@ func NewClient(upstream *config.UpstreamProxy, timeout time.Duration) *Client {
 			transport.TLSClientConfig = &tls.Config{}
 		}
 	}
-	return &Client{http: &http.Client{Transport: transport, Timeout: timeout}}
+	return &Client{http: &http.Client{
+		Transport:     transport,
+		Timeout:       timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}}
 }
 
 // Fetch downloads the VPNGate server list.

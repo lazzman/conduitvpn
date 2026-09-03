@@ -89,6 +89,30 @@ func (s *Store) LoadNodes() ([]*node.Node, error) {
 	return nodes, nil
 }
 
+type VPNGateSources struct {
+	Mirrors []string `json:"mirrors"`
+}
+
+func (s *Store) VPNGateSourcesPath() string { return filepath.Join(s.dir, "vpngate_sources.json") }
+
+func (s *Store) SaveVPNGateSources(sources VPNGateSources) error {
+	if sources.Mirrors == nil {
+		sources.Mirrors = []string{}
+	}
+	return writeJSON(s.VPNGateSourcesPath(), sources)
+}
+
+func (s *Store) LoadVPNGateSources() (VPNGateSources, error) {
+	var sources VPNGateSources
+	if err := readJSON(s.VPNGateSourcesPath(), &sources); err != nil {
+		return sources, err
+	}
+	if sources.Mirrors == nil {
+		sources.Mirrors = []string{}
+	}
+	return sources, nil
+}
+
 // BlacklistEntry records why and when a node was blacklisted.
 type BlacklistEntry struct {
 	Reason   string `json:"reason"`

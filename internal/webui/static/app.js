@@ -168,6 +168,226 @@ $("btn-blacklist-restore").addEventListener("click", async () => {
   } catch (_) {}
 });
 
+/* ---- VPNGate source settings ---- */
+let sourceStatus = null;
+let sourcePollTimer = null;
+let sourceDirty = false;
+
+function formatSourceTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(window.ConduitI18n.locale(), {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).format(date);
+}
+
+function renderSourceStatus(status) {
+  if (!status) return;
+  sourceStatus = status;
+  $("sources-official").value = status.official_url || "—";
+  $("sources-current").textContent = status.current_source || window.ConduitI18n.t("sources.none");
+  $("sources-last-attempt").textContent = formatSourceTime(status.last_attempt_at);
+  $("sources-last-success").textContent = formatSourceTime(status.last_success_at);
+  const attempts = status.attempts || [];
+  $("sources-attempts").replaceChildren();
+  for (const attempt of attempts) {
+    const line = document.createElement("div");
+    line.className = attempt.ok ? "source-attempt ok" : "source-attempt failed";
+    line.textContent = window.ConduitI18n.t("sources.attempt", {
+      url: attempt.url,
+      result: attempt.ok ? window.ConduitI18n.t("sources.ok") : (attempt.error || window.ConduitI18n.t("sources.failed")),
+    });
+    $("sources-attempts").appendChild(line);
+  }
+  const message = $("sources-save-msg");
+  if (status.refreshing && !message.classList.contains("err")) {
+    message.textContent = window.ConduitI18n.t("sources.refreshing");
+    message.classList.remove("err");
+    message.dataset.refreshing = "true";
+  } else if (message.dataset.refreshing === "true") {
+    message.textContent = "";
+    delete message.dataset.refreshing;
+  }
+}
+
+function scheduleSourceStatusPoll() {
+  clearTimeout(sourcePollTimer);
+  if ($("sources-dialog").open) sourcePollTimer = setTimeout(() => loadSourceStatus(false), 900);
+}
+
+function loadSourceStatus(syncMirrors = false) {
+  return fetch("./api/vpngate-sources")
+    .then((response) => response.ok ? response.json() : null)
+    .then((status) => {
+      if (!status) {
+        if ($("sources-dialog").open) scheduleSourceStatusPoll();
+        return null;
+      }
+      renderSourceStatus(status);
+      if (syncMirrors && !sourceDirty) $("sources-text").value = (status.mirrors || []).join("\n");
+      clearTimeout(sourcePollTimer);
+      if ($("sources-dialog").open) scheduleSourceStatusPoll();
+      return status;
+    })
+    .catch(() => {
+      if ($("sources-dialog").open) scheduleSourceStatusPoll();
+      return null;
+    });
+}
+
+function showSourceInputMessage(message, error = false) {
+  const node = $("sources-input-msg");
+  node.textContent = message || "";
+  node.classList.toggle("err", error);
+}
+
+function normalizePastedURLs(text) {
+  const origins = [];
+  const seen = new Set();
+  const starts = [];
+  const startRe = /\bhttps?:\/\//gi;
+  let match;
+  while ((match = startRe.exec(text)) !== null) starts.push(match.index);
+  let coveredUntil = 0;
+  for (const start of starts) {
+    if (start < coveredUntil) continue;
+    const segment = cutPastedURLSegment(text.slice(start));
+    coveredUntil = start + segment.length;
+    let token = segment;
+    token = trimPastedURLToken(token);
+    try {
+      const url = new URL(token);
+      if (url.username || url.password || !["http:", "https:"].includes(url.protocol)) continue;
+      const rawHost = url.hostname.toLowerCase().replace(/\.$/, "");
+      const host = rawHost.includes(":") && !rawHost.startsWith("[") ? `[${rawHost}]` : rawHost;
+      const keepPort = url.port && !((url.protocol === "http:" && url.port === "80") || (url.protocol === "https:" && url.port === "443"));
+      const origin = url.protocol + "//" + host + (keepPort ? ":" + url.port : "");
+      if (!seen.has(origin)) { seen.add(origin); origins.push(origin); }
+    } catch (_) {}
+  }
+  return origins;
+}
+
+function cutPastedURLSegment(segment) {
+  const schemeEnd = segment.search(/:\/\//);
+  for (let i = 0; i < segment.length; i++) {
+    const ch = segment[i];
+    if (/[\s<>"'()（）},;|，；、｜]/u.test(ch)) return segment.slice(0, i);
+    if ((ch === "[" || ch === "{" || ch === "【") && (schemeEnd < 0 || i > schemeEnd + 3)) return segment.slice(0, i);
+  }
+  return segment;
+}
+
+function trimPastedURLToken(token) {
+  while (token) {
+    const last = token[token.length - 1];
+    if (/[.,;:!?\}>'"`’‘”“〉》】》，。；：！？…]/u.test(last)) {
+      token = token.slice(0, -1);
+      continue;
+    }
+    if (last === ")" && [...token].filter((c) => c === ")").length > [...token].filter((c) => c === "(").length) {
+      token = token.slice(0, -1);
+      continue;
+    }
+    if (last === "]" && [...token].filter((c) => c === "]").length > [...token].filter((c) => c === "[").length) {
+      token = token.slice(0, -1);
+      continue;
+    }
+    if (last === "）" && [...token].filter((c) => c === "）").length > [...token].filter((c) => c === "（").length) {
+      token = token.slice(0, -1);
+      continue;
+    }
+    if (last === "】" && [...token].filter((c) => c === "】").length > [...token].filter((c) => c === "【").length) {
+      token = token.slice(0, -1);
+      continue;
+    }
+    break;
+  }
+  return token;
+}
+
+$("sources-text").addEventListener("paste", (event) => {
+  event.preventDefault();
+  const text = event.clipboardData?.getData("text") || "";
+  const input = $("sources-text");
+  const before = input.value.slice(0, input.selectionStart);
+  const after = input.value.slice(input.selectionEnd);
+  if (normalizePastedURLs(text).length === 0) {
+    showSourceInputMessage(window.ConduitI18n.t("sources.noURL"), true);
+    return;
+  }
+  const origins = normalizePastedURLs(before + text + after);
+  if (origins.length === 0) {
+    showSourceInputMessage(window.ConduitI18n.t("sources.noURL"), true);
+    return;
+  }
+  input.value = origins.join("\n");
+  sourceDirty = true;
+  showSourceInputMessage("");
+});
+
+$("sources-text").addEventListener("input", () => {
+  sourceDirty = true;
+  showSourceInputMessage("");
+});
+
+$("btn-sources").addEventListener("click", () => {
+  $("sources-dialog").showModal();
+  const message = $("sources-save-msg");
+  message.textContent = "";
+  message.classList.remove("err");
+  delete message.dataset.refreshing;
+  sourceDirty = false;
+  loadSourceStatus(true);
+});
+$("btn-sources-close").addEventListener("click", () => $("sources-dialog").close());
+$("btn-sources-cancel").addEventListener("click", () => $("sources-dialog").close());
+$("sources-dialog").addEventListener("close", () => {
+  clearTimeout(sourcePollTimer);
+  sourcePollTimer = null;
+  showSourceInputMessage("");
+  const message = $("sources-save-msg");
+  message.textContent = "";
+  message.classList.remove("err");
+  delete message.dataset.refreshing;
+  sourceDirty = false;
+});
+
+$("btn-sources-save").addEventListener("click", async () => {
+  const button = $("btn-sources-save");
+  button.disabled = true;
+  const message = $("sources-save-msg");
+  message.textContent = window.ConduitI18n.t("action.applying");
+  message.classList.remove("err");
+  delete message.dataset.refreshing;
+  try {
+    const response = await fetch("./api/vpngate-sources", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: $("sources-text").value }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      message.textContent = result.error || window.ConduitI18n.t("sources.saveFailed");
+      message.classList.add("err");
+      return;
+    }
+    $("sources-text").value = (result.mirrors || []).join("\n");
+    sourceDirty = false;
+    const issues = result.issues || [];
+    showSourceInputMessage(issues.length ? window.ConduitI18n.t("sources.filtered", { count: issues.length }) : "", Boolean(issues.length));
+    message.textContent = window.ConduitI18n.t("sources.saved");
+    message.classList.remove("err");
+    await loadSourceStatus(false);
+    scheduleSourceStatusPoll();
+  } catch (_) {
+    message.textContent = window.ConduitI18n.t("errors.network");
+    message.classList.add("err");
+  } finally {
+    button.disabled = false;
+  }
+});
+
 /* ---- node table ---- */
 let nodes = [];
 let sortKey = "latency";
@@ -639,6 +859,7 @@ document.addEventListener("conduit-language-change", () => {
   renderRoute();
   renderBlacklistManager();
   renderLogs(lastLogs);
+  if (sourceStatus && $("sources-dialog").open) renderSourceStatus(sourceStatus);
   const vals = latSeries.filter((x) => x != null);
   const last = vals[vals.length - 1];
   $("lat-summary").textContent = last != null

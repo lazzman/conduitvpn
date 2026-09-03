@@ -2,6 +2,8 @@ package webui
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,7 +12,9 @@ import (
 
 	"conduitvpn/internal/config"
 	"conduitvpn/internal/manager"
+	"conduitvpn/internal/node"
 	"conduitvpn/internal/state"
+	"conduitvpn/internal/vpngate"
 )
 
 func TestStaticAssetVersionStable(t *testing.T) {
@@ -322,6 +326,164 @@ func TestEmbeddedBlacklistManagerUI(t *testing.T) {
 		if !strings.Contains(string(page), selector) {
 			t.Fatalf("index.html missing %q", selector)
 		}
+	}
+}
+
+func TestVPNGateSourcesAPIGetPutAndClear(t *testing.T) {
+	dir := t.TempDir()
+	store := state.NewStore(dir)
+	if _, _, err := store.EnsureAuth(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DataDir: dir, Demo: true, APIURL: "https://official.example/api/iphone/"}
+	mgr := manager.NewDemo(cfg)
+	s := New(cfg, store, mgr)
+
+	get := httptest.NewRecorder()
+	s.apiVPNGateSources(get, httptest.NewRequest(http.MethodGet, "/api/vpngate-sources", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", get.Code, get.Body.String())
+	}
+	var initial manager.VPNGateSourceStatus
+	if err := json.Unmarshal(get.Body.Bytes(), &initial); err != nil {
+		t.Fatal(err)
+	}
+	if initial.OfficialURL != cfg.APIURL || initial.Mirrors == nil || initial.Attempts == nil {
+		t.Fatalf("initial source status = %+v", initial)
+	}
+
+	putBody := `{"text":"http://EXAMPLE.com/cn/ (Japan)\nhttps://example.com:443/api/iphone/\nexample.net:8080"}`
+	put := httptest.NewRecorder()
+	s.apiVPNGateSources(put, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", bytes.NewBufferString(putBody)))
+	if put.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body = %s", put.Code, put.Body.String())
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(put.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved["ok"] != true {
+		t.Fatalf("PUT response = %#v", saved)
+	}
+	mirrors, ok := saved["mirrors"].([]any)
+	if !ok || len(mirrors) != 2 || mirrors[0] != "http://example.com" || mirrors[1] != "https://example.com" {
+		t.Fatalf("normalized mirrors = %#v", saved["mirrors"])
+	}
+	if issues, ok := saved["issues"].([]any); !ok || len(issues) == 0 {
+		t.Fatalf("expected bare-address issue, response = %#v", saved)
+	}
+
+	clear := httptest.NewRecorder()
+	s.apiVPNGateSources(clear, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", bytes.NewBufferString(`{"text":""}`)))
+	if clear.Code != http.StatusOK || !strings.Contains(clear.Body.String(), `"mirrors":[]`) {
+		t.Fatalf("clear response = %d %s", clear.Code, clear.Body.String())
+	}
+	loaded, err := store.LoadVPNGateSources()
+	if err != nil || loaded.Mirrors == nil || len(loaded.Mirrors) != 0 {
+		t.Fatalf("persisted clear = %#v, err=%v", loaded, err)
+	}
+}
+
+func TestVPNGateSourcesAPIErrorsPreserveOldConfig(t *testing.T) {
+	dir := t.TempDir()
+	store := state.NewStore(dir)
+	if _, _, err := store.EnsureAuth(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DataDir: dir, Demo: true}
+	mgr := manager.NewDemo(cfg)
+	if _, err := mgr.SetVPNGateMirrors(nil, "http://old.example"); err != nil {
+		t.Fatal(err)
+	}
+	s := New(cfg, store, mgr)
+
+	bad := httptest.NewRecorder()
+	s.apiVPNGateSources(bad, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", bytes.NewBufferString(`{"text":"not-a-url"}`)))
+	if bad.Code != http.StatusBadRequest || !strings.Contains(bad.Body.String(), `"code":"sources_invalid"`) {
+		t.Fatalf("invalid PUT = %d %s", bad.Code, bad.Body.String())
+	}
+	missing := httptest.NewRecorder()
+	s.apiVPNGateSources(missing, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", bytes.NewBufferString(`{}`)))
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), `"code":"sources_invalid"`) {
+		t.Fatalf("missing text PUT = %d %s", missing.Code, missing.Body.String())
+	}
+	status := mgr.VPNGateSourceStatus()
+	if len(status.Mirrors) != 1 || status.Mirrors[0] != "http://old.example" {
+		t.Fatalf("old config was changed: %+v", status)
+	}
+
+	var b strings.Builder
+	for i := 0; i < vpngate.MaxMirrorCount+1; i++ {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "http://mirror-%d.example", i)
+	}
+	tooMany := httptest.NewRecorder()
+	s.apiVPNGateSources(tooMany, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", strings.NewReader(fmt.Sprintf(`{"text":%q}`, b.String()))))
+	if tooMany.Code != http.StatusBadRequest || !strings.Contains(tooMany.Body.String(), `"code":"sources_too_large"`) {
+		t.Fatalf("too many mirrors = %d %s", tooMany.Code, tooMany.Body.String())
+	}
+
+	method := httptest.NewRecorder()
+	s.apiVPNGateSources(method, httptest.NewRequest(http.MethodPost, "/api/vpngate-sources", nil))
+	if method.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, body = %s", method.Code, method.Body.String())
+	}
+
+	largeBody := strings.NewReader(`{"text":"` + strings.Repeat("x", 150000) + `"}`)
+	tooLarge := httptest.NewRecorder()
+	s.apiVPNGateSources(tooLarge, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", largeBody))
+	if tooLarge.Code != http.StatusBadRequest || !strings.Contains(tooLarge.Body.String(), `"code":"sources_too_large"`) {
+		t.Fatalf("oversized request = %d %s", tooLarge.Code, tooLarge.Body.String())
+	}
+}
+
+func TestEmbeddedVPNGateSourcesUI(t *testing.T) {
+	page, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(page)
+	for _, want := range []string{"btn-sources", "sources-dialog", "sources-text", "data-i18n=\"sources.title\"", "data-i18n-placeholder=\"sources.placeholder\""} {
+		if !strings.Contains(text, want) {
+			t.Errorf("index.html missing %q", want)
+		}
+	}
+	js, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"normalizePastedURLs", "api/vpngate-sources", "clipboardData"} {
+		if !strings.Contains(string(js), want) {
+			t.Errorf("app.js missing %q", want)
+		}
+	}
+}
+
+func TestAPINodesStripsOpenVPNConfig(t *testing.T) {
+	dir := t.TempDir()
+	store := state.NewStore(dir)
+	nodes := []*node.Node{
+		{HostName: "safe-node", IP: "8.8.8.8", ConfigText: "<key>private material</key>"},
+		nil,
+	}
+	if err := store.SaveNodes(nodes); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DataDir: dir}
+	s := New(cfg, store, manager.New(cfg))
+	w := httptest.NewRecorder()
+	s.apiNodes(w, httptest.NewRequest(http.MethodGet, "/api/nodes", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET nodes status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var got []*node.Node
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ConfigText != "" {
+		t.Fatalf("nodes response leaked config: %#v", got)
 	}
 }
 
