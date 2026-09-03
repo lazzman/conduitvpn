@@ -14,9 +14,9 @@ import (
 	"conduitvpn/internal/node"
 )
 
-// VPNGate API layout: a leading "*vpn_servers" line, a "#HostName,IP,..."
-// CSV header, then data rows. The last column is the base64-encoded
-// OpenVPN config of the node.
+// VPNGate API layout: an optional metadata/preamble section, a
+// "#HostName,IP,..." CSV header, then data rows. The last column is the
+// base64-encoded OpenVPN config of the node.
 var remoteRe = regexp.MustCompile(`(?m)^remote\s+(\S+)\s+(\d+)(?:\s+(udp|tcp))?`)
 
 func Parse(raw []byte) ([]*node.Node, error) {
@@ -28,19 +28,23 @@ func Parse(raw []byte) ([]*node.Node, error) {
 		return nil, errors.New("empty csv payload")
 	}
 
-	col := indexColumns(records[0])
+	headerAt := findHeaderRecord(records)
+	if headerAt < 0 {
+		return nil, errors.New("VPNGate CSV header not found")
+	}
+	col := indexColumns(records[headerAt])
 	need := []string{
-		"HostName", "IP", "Score", "Ping", "Speed",
+		"IP", "Score", "Ping", "Speed",
 		"CountryLong", "CountryShort", "NumVpnSessions", "Uptime",
 		"LogType", "Operator", "Message", "OpenVPN_ConfigData_Base64",
 	}
 	for _, k := range need {
-		if _, ok := col[k]; !ok {
+		if _, ok := lookupColumn(col, k); !ok {
 			return nil, fmt.Errorf("missing csv column %q", k)
 		}
 	}
 	get := func(row []string, key string) string {
-		i, ok := col[key]
+		i, ok := lookupColumn(col, key)
 		if !ok || i >= len(row) {
 			return ""
 		}
@@ -48,8 +52,8 @@ func Parse(raw []byte) ([]*node.Node, error) {
 	}
 
 	var nodes []*node.Node
-	for _, row := range records[1:] {
-		if len(row) == 0 || strings.HasPrefix(row[0], "*") {
+	for _, row := range records[headerAt+1:] {
+		if len(row) == 0 || strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(row[0], "\ufeff")), "*") {
 			continue // trailing "*END" etc.
 		}
 		cfgText, err := decodeConfig(get(row, "OpenVPN_ConfigData_Base64"))
@@ -61,7 +65,6 @@ func Parse(raw []byte) ([]*node.Node, error) {
 			continue // untrusted profile uses unsupported or unsafe directives
 		}
 		n := &node.Node{
-			HostName:     get(row, "HostName"),
 			IP:           get(row, "IP"),
 			Score:        atoi(get(row, "Score")),
 			Ping:         atoi(get(row, "Ping")),
@@ -74,6 +77,13 @@ func Parse(raw []byte) ([]*node.Node, error) {
 			Operator:     get(row, "Operator"),
 			Message:      get(row, "Message"),
 			ConfigText:   cfgText,
+		}
+		// HostName has historically been part of the API, but some mirrors
+		// omit it or spell it differently. The IP is still a stable and
+		// validated node identity, so use it as a safe display/blacklist key.
+		n.HostName = get(row, "HostName")
+		if n.HostName == "" {
+			n.HostName = n.IP
 		}
 		n.RemoteHost, n.RemotePort, n.RemoteProto = parseRemote(cfgText, n.IP)
 		nodes = append(nodes, n)
@@ -241,15 +251,29 @@ func isPublicIPv4(s string) bool {
 	return !(v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127)
 }
 
-// readCSV strips the leading "*vpn_servers" comment line and parses the
-// rest with a lenient CSV reader (LazyQuotes handles odd quoting in
-// operator/message fields).
+// readCSV locates the first line that looks like a VPNGate header before
+// parsing the rest with a lenient CSV reader. The endpoint occasionally adds
+// a UTF-8 BOM or an informational preamble, and mirrors may prepend their own
+// metadata; anchoring on the header keeps those variants parseable.
 func readCSV(raw []byte) ([][]string, error) {
+	raw = bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf})
 	lines := bytes.Split(raw, []byte("\n"))
-	start := 0
+	start := -1
 	for i, line := range lines {
-		t := bytes.TrimSpace(line)
-		if len(t) > 0 {
+		if fields := parseCSVLine(line); isVPNGateHeader(fields) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		// Preserve the old behavior for malformed payloads so Parse can return
+		// a useful header error instead of failing inside the CSV reader.
+		start = 0
+		for i, line := range lines {
+			t := bytes.TrimSpace(bytes.TrimPrefix(line, []byte{0xef, 0xbb, 0xbf}))
+			if len(t) == 0 {
+				continue
+			}
 			if t[0] == '*' {
 				start = i + 1
 				continue
@@ -266,10 +290,82 @@ func readCSV(raw []byte) ([][]string, error) {
 func indexColumns(header []string) map[string]int {
 	idx := make(map[string]int, len(header))
 	for i, h := range header {
-		name := strings.TrimPrefix(strings.TrimSpace(h), "#")
+		name := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(h, "\ufeff")), "#")
+		if name == "" {
+			continue
+		}
 		idx[name] = i
+		if canonical := canonicalColumnName(name); canonical != "" {
+			idx[canonical] = i
+		}
 	}
 	return idx
+}
+
+func lookupColumn(columns map[string]int, key string) (int, bool) {
+	i, ok := columns[canonicalColumnName(key)]
+	return i, ok
+}
+
+func canonicalColumnName(value string) string {
+	value = strings.TrimSpace(strings.TrimPrefix(value, "\ufeff"))
+	value = strings.TrimPrefix(value, "#")
+	var b strings.Builder
+	for _, r := range strings.ToLower(value) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	name := b.String()
+	switch name {
+	case "ddnshostname":
+		return "hostname"
+	case "ipaddress":
+		return "ip"
+	case "sessions":
+		return "numvpnsessions"
+	case "openvpnconfigbase64":
+		return "openvpnconfigdatabase64"
+	default:
+		return name
+	}
+}
+
+func parseCSVLine(line []byte) []string {
+	r := csv.NewReader(bytes.NewReader(line))
+	r.FieldsPerRecord = -1
+	r.LazyQuotes = true
+	fields, err := r.Read()
+	if err != nil {
+		return nil
+	}
+	return fields
+}
+
+func isVPNGateHeader(fields []string) bool {
+	if len(fields) == 0 {
+		return false
+	}
+	columns := indexColumns(fields)
+	_, hasIP := lookupColumn(columns, "IP")
+	_, hasConfig := lookupColumn(columns, "OpenVPN_ConfigData_Base64")
+	if !hasIP || !hasConfig {
+		// A malformed but recognizable header should still be returned to
+		// Parse so it can report the specific missing column.
+		_, hasHost := lookupColumn(columns, "HostName")
+		_, hasScore := lookupColumn(columns, "Score")
+		return hasIP && (hasHost || hasScore)
+	}
+	return true
+}
+
+func findHeaderRecord(records [][]string) int {
+	for i, record := range records {
+		if isVPNGateHeader(record) {
+			return i
+		}
+	}
+	return -1
 }
 
 func decodeConfig(b64 string) (string, error) {
