@@ -1,0 +1,8 @@
+main = "src/index.js"
+compatibility_date = "2026-09-03"
+workers_dev = true
+
+# Worker 名称在部署时通过 --name 传入，避免将实际 workers.dev 子域提交到仓库。
+# 必须以 Secret 配置 VPNGATE_PROXY_PASSWORD（详见 README.md）。
+# 可选：在 Cloudflare Dashboard 的 Worker Settings → Variables and Secrets
+# 中配置 VPNGATE_API_URL，以替代代码中的官方默认地址。

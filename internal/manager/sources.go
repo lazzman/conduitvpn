@@ -55,7 +55,11 @@ func (m *Manager) loadVPNGateSources() {
 		if len(valid) >= vpngate.MaxMirrorCount {
 			break
 		}
-		origin, err := vpngate.NormalizeMirrorOrigin(raw)
+		source, err := vpngate.NormalizeMirrorSource(raw)
+		if err != nil {
+			continue
+		}
+		origin, err := vpngate.MirrorSourceOrigin(source)
 		if err != nil {
 			continue
 		}
@@ -63,11 +67,11 @@ func (m *Manager) loadVPNGateSources() {
 			continue
 		}
 		seen[origin] = struct{}{}
-		valid = append(valid, origin)
+		valid = append(valid, source)
 	}
 	m.sourceMu.Lock()
 	m.mirrors = valid
-	m.sourceStatus.Mirrors = cloneStrings(valid)
+	m.sourceStatus.Mirrors = redactSourceURLs(valid)
 	m.sourceMu.Unlock()
 	if len(valid) > 0 {
 		logx.Info("VPNGate mirrors loaded", "count", len(valid))
@@ -78,10 +82,27 @@ func (m *Manager) VPNGateSourceStatus() VPNGateSourceStatus {
 	m.sourceMu.Lock()
 	defer m.sourceMu.Unlock()
 	status := m.sourceStatus
-	status.OfficialURL = m.cfg.APIURL
-	status.Mirrors = cloneStrings(m.mirrors)
+	status.OfficialURL = redactSourceURL(m.cfg.APIURL)
+	status.Mirrors = redactSourceURLs(m.mirrors)
 	status.Attempts = append([]VPNGateSourceAttempt{}, m.sourceStatus.Attempts...)
 	return status
+}
+
+// redactSourceURL removes userinfo before a source URL reaches the Web UI or
+// structured logs. The original URL remains in sourceEndpoint for requests.
+func redactSourceURL(raw string) string {
+	return vpngate.RedactSourceURL(raw)
+}
+
+func redactSourceURLs(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	redacted := make([]string, 0, len(values))
+	for _, value := range values {
+		redacted = append(redacted, redactSourceURL(value))
+	}
+	return redacted
 }
 
 func cloneStrings(values []string) []string {
@@ -122,39 +143,73 @@ func (m *Manager) SetVPNGateMirrors(ctx context.Context, text string) (VPNGateMi
 		return VPNGateMirrorUpdate{Mirrors: []string{}}, nil
 	}
 
-	origins, issues := vpngate.ParseMirrorText(text)
-	if len(origins) > vpngate.MaxMirrorCount {
-		return VPNGateMirrorUpdate{}, fmt.Errorf("%w: mirror list exceeds %d entries (got %d)", vpngate.ErrMirrorCountTooLarge, vpngate.MaxMirrorCount, len(origins))
+	sources, issues := vpngate.ParseMirrorText(text)
+	if len(sources) > vpngate.MaxMirrorCount {
+		return VPNGateMirrorUpdate{}, fmt.Errorf("%w: mirror list exceeds %d entries (got %d)", vpngate.ErrMirrorCountTooLarge, vpngate.MaxMirrorCount, len(sources))
 	}
+	m.sourceMu.Lock()
+	existing := cloneStrings(m.mirrors)
+	m.sourceMu.Unlock()
+	sources = preserveMirrorCredentials(sources, existing)
 	if !m.demo {
 		var checkedIssues []vpngate.MirrorIssue
-		origins, checkedIssues = m.validateMirrorOrigins(ctx, origins, 5*time.Second)
+		sources, checkedIssues = m.validateMirrorOrigins(ctx, sources, 5*time.Second)
 		issues = append(issues, checkedIssues...)
 		if err := ctx.Err(); err != nil {
-			return VPNGateMirrorUpdate{Issues: issues}, err
+			return VPNGateMirrorUpdate{Mirrors: redactSourceURLs(sources), Issues: issues}, err
 		}
 	}
-	if len(origins) == 0 {
+	if len(sources) == 0 {
 		return VPNGateMirrorUpdate{Issues: issues}, errors.New("no valid HTTP(S) mirror URL found")
 	}
 	if err := ctx.Err(); err != nil {
-		return VPNGateMirrorUpdate{Mirrors: origins, Issues: issues}, err
+		return VPNGateMirrorUpdate{Mirrors: redactSourceURLs(sources), Issues: issues}, err
 	}
 	m.sourceMu.Lock()
-	err := m.store.SaveVPNGateSources(state.VPNGateSources{Mirrors: origins})
+	err := m.store.SaveVPNGateSources(state.VPNGateSources{Mirrors: sources})
 	if err == nil {
-		m.mirrors = append([]string(nil), origins...)
-		m.sourceStatus.Mirrors = cloneStrings(origins)
+		m.mirrors = append([]string(nil), sources...)
+		m.sourceStatus.Mirrors = redactSourceURLs(sources)
 	}
 	m.sourceMu.Unlock()
 	if err != nil {
 		return VPNGateMirrorUpdate{}, fmt.Errorf("%w: %v", ErrVPNGateSourcesSave, err)
 	}
 	m.triggerSourceRefresh()
-	return VPNGateMirrorUpdate{Mirrors: origins, Issues: issues}, nil
+	return VPNGateMirrorUpdate{Mirrors: redactSourceURLs(sources), Issues: issues}, nil
 }
 
-func (m *Manager) validateMirrorOrigins(ctx context.Context, origins []string, timeout time.Duration) ([]string, []vpngate.MirrorIssue) {
+// preserveMirrorCredentials keeps existing Basic Auth for a redacted source
+// returned by the settings API. Pasting the same source with userinfo replaces
+// its credentials; deleting it and saving removes them.
+func preserveMirrorCredentials(sources, existing []string) []string {
+	protectedByOrigin := make(map[string]string)
+	for _, source := range existing {
+		if !vpngate.HasMirrorSourceCredentials(source) {
+			continue
+		}
+		origin, err := vpngate.MirrorSourceOrigin(source)
+		if err == nil {
+			protectedByOrigin[origin] = source
+		}
+	}
+	preserved := cloneStrings(sources)
+	for i, source := range preserved {
+		if vpngate.HasMirrorSourceCredentials(source) {
+			continue
+		}
+		origin, err := vpngate.MirrorSourceOrigin(source)
+		if err != nil {
+			continue
+		}
+		if protected, ok := protectedByOrigin[origin]; ok {
+			preserved[i] = protected
+		}
+	}
+	return preserved
+}
+
+func (m *Manager) validateMirrorOrigins(ctx context.Context, sources []string, timeout time.Duration) ([]string, []vpngate.MirrorIssue) {
 	ctx = nonNilContext(ctx)
 	validator := m.mirrorValidator
 	if validator == nil {
@@ -163,14 +218,19 @@ func (m *Manager) validateMirrorOrigins(ctx context.Context, origins []string, t
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	results := make([]error, len(origins))
+	results := make([]error, len(sources))
 	semaphore := make(chan struct{}, 8)
 	var wg sync.WaitGroup
-	for i, origin := range origins {
-		i, origin := i, origin
+	for i, source := range sources {
+		i, source := i, source
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			origin, err := vpngate.MirrorSourceOrigin(source)
+			if err != nil {
+				results[i] = err
+				return
+			}
 			select {
 			case semaphore <- struct{}{}:
 			case <-ctx.Done():
@@ -184,14 +244,14 @@ func (m *Manager) validateMirrorOrigins(ctx context.Context, origins []string, t
 		}()
 	}
 	wg.Wait()
-	checked := make([]string, 0, len(origins))
+	checked := make([]string, 0, len(sources))
 	issues := make([]vpngate.MirrorIssue, 0)
-	for i, origin := range origins {
+	for i, source := range sources {
 		if err := results[i]; err != nil {
-			issues = append(issues, vpngate.MirrorIssue{Token: origin, Reason: err.Error()})
+			issues = append(issues, vpngate.MirrorIssue{Token: redactSourceURL(source), Reason: err.Error()})
 			continue
 		}
-		checked = append(checked, origin)
+		checked = append(checked, source)
 	}
 	return checked, issues
 }
@@ -210,11 +270,11 @@ func (m *Manager) validateMirror(ctx context.Context, origin string, timeout tim
 	return validator(checkCtx, origin)
 }
 
-func mirrorEndpoint(origin string) string {
-	if normalized, err := vpngate.NormalizeMirrorOrigin(origin); err == nil {
-		origin = normalized
+func mirrorEndpoint(source string) string {
+	if normalized, err := vpngate.NormalizeMirrorSource(source); err == nil {
+		source = normalized
 	}
-	return strings.TrimRight(origin, "/") + mirrorAPIPath
+	return strings.TrimRight(source, "/") + mirrorAPIPath
 }
 
 type sourceEndpoint struct {
@@ -232,8 +292,12 @@ func (m *Manager) sourceList() []sourceEndpoint {
 func buildSourceList(officialURL string, mirrors []string) []sourceEndpoint {
 	sources := make([]sourceEndpoint, 0, len(mirrors)+1)
 	sources = append(sources, sourceEndpoint{URL: officialURL})
-	for _, origin := range mirrors {
-		sources = append(sources, sourceEndpoint{URL: mirrorEndpoint(origin), Origin: origin})
+	for _, mirror := range mirrors {
+		origin, err := vpngate.MirrorSourceOrigin(mirror)
+		if err != nil {
+			continue
+		}
+		sources = append(sources, sourceEndpoint{URL: mirrorEndpoint(mirror), Origin: origin})
 	}
 	return sources
 }
@@ -245,8 +309,8 @@ func (m *Manager) beginSourceRefresh() []sourceEndpoint {
 	m.sourceMu.Lock()
 	mirrors := append([]string(nil), m.mirrors...)
 	m.sourceStatus.Refreshing = true
-	m.sourceStatus.OfficialURL = m.cfg.APIURL
-	m.sourceStatus.Mirrors = cloneStrings(mirrors)
+	m.sourceStatus.OfficialURL = redactSourceURL(m.cfg.APIURL)
+	m.sourceStatus.Mirrors = redactSourceURLs(mirrors)
 	m.sourceStatus.Attempts = []VPNGateSourceAttempt{}
 	m.sourceStatus.LastAttemptAt = time.Now().Format(time.RFC3339)
 	m.sourceMu.Unlock()
@@ -359,13 +423,14 @@ func (m *Manager) refreshNodes(ctx context.Context, foreground bool) []*node.Nod
 		if err := ctx.Err(); err != nil {
 			break
 		}
-		attempt := VPNGateSourceAttempt{URL: source.URL}
+		displayURL := redactSourceURL(source.URL)
+		attempt := VPNGateSourceAttempt{URL: displayURL}
 		if source.Origin != "" {
 			if err := m.validateMirror(ctx, source.Origin, validationTimeout); err != nil {
 				attempt.Error = err.Error()
 				attempt.FinishedAt = time.Now().Format(time.RFC3339)
 				attempts = append(attempts, attempt)
-				logx.Warn("VPNGate mirror rejected", "url", source.URL, "err", err)
+				logx.Warn("VPNGate mirror rejected", "url", displayURL, "err", err)
 				if ctx.Err() != nil {
 					break
 				}
@@ -378,7 +443,7 @@ func (m *Manager) refreshNodes(ctx context.Context, foreground bool) []*node.Nod
 			attempt.Error = err.Error()
 			attempt.FinishedAt = time.Now().Format(time.RFC3339)
 			attempts = append(attempts, attempt)
-			logx.Warn("VPNGate source fetch failed", "url", source.URL, "err", err)
+			logx.Warn("VPNGate source fetch failed", "url", displayURL, "err", err)
 			if ctx.Err() != nil {
 				break
 			}
@@ -389,7 +454,7 @@ func (m *Manager) refreshNodes(ctx context.Context, foreground bool) []*node.Nod
 			attempt.Error = "parse: " + err.Error()
 			attempt.FinishedAt = time.Now().Format(time.RFC3339)
 			attempts = append(attempts, attempt)
-			logx.Warn("VPNGate source parse failed", "url", source.URL, "err", err)
+			logx.Warn("VPNGate source parse failed", "url", displayURL, "err", err)
 			continue
 		}
 		candidates := node.SortByScore(parsed)
@@ -397,13 +462,13 @@ func (m *Manager) refreshNodes(ctx context.Context, foreground bool) []*node.Nod
 			attempt.Error = "parse: no valid nodes"
 			attempt.FinishedAt = time.Now().Format(time.RFC3339)
 			attempts = append(attempts, attempt)
-			logx.Warn("VPNGate source returned no valid nodes", "url", source.URL)
+			logx.Warn("VPNGate source returned no valid nodes", "url", displayURL)
 			continue
 		}
 		if len(candidates) > m.cfg.MaxScanRows && m.cfg.MaxScanRows > 0 {
 			candidates = candidates[:m.cfg.MaxScanRows]
 		}
-		logx.Info("benchmarking candidates", "source", source.URL, "count", len(candidates))
+		logx.Info("benchmarking candidates", "source", displayURL, "count", len(candidates))
 		benchmark.Run(ctx, candidates, m.benchConcurrency(), m.benchTimeout())
 		if ctx.Err() != nil {
 			attempt.Error = ctx.Err().Error()
@@ -424,8 +489,8 @@ func (m *Manager) refreshNodes(ctx context.Context, foreground bool) []*node.Nod
 		attempt.OK = true
 		attempt.FinishedAt = time.Now().Format(time.RFC3339)
 		attempts = append(attempts, attempt)
-		m.finishSourceRefresh(attempts, source.URL, true)
-		logx.Info("VPNGate source selected", "url", source.URL, "nodes", len(candidates))
+		m.finishSourceRefresh(attempts, displayURL, true)
+		logx.Info("VPNGate source selected", "url", displayURL, "nodes", len(candidates))
 		return candidates
 	}
 

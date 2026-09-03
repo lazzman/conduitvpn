@@ -384,6 +384,59 @@ func TestVPNGateSourcesAPIGetPutAndClear(t *testing.T) {
 	}
 }
 
+func TestVPNGateSourcesAPIRedactsMirrorCredentialsAndPreservesThem(t *testing.T) {
+	dir := t.TempDir()
+	store := state.NewStore(dir)
+	if _, _, err := store.EnsureAuth(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DataDir: dir, Demo: true}
+	mgr := manager.NewDemo(cfg)
+	s := New(cfg, store, mgr)
+
+	const password = "mirror-password"
+	const authenticated = "https://mirror-password@secure.example/cn/"
+	put := httptest.NewRecorder()
+	s.apiVPNGateSources(put, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", strings.NewReader(fmt.Sprintf(`{"text":%q}`, authenticated))))
+	if put.Code != http.StatusOK {
+		t.Fatalf("authenticated PUT = %d %s", put.Code, put.Body.String())
+	}
+	if strings.Contains(put.Body.String(), password) {
+		t.Fatalf("PUT response leaked mirror password: %s", put.Body.String())
+	}
+	var response struct {
+		Mirrors []string `json:"mirrors"`
+	}
+	if err := json.Unmarshal(put.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Mirrors) != 1 || response.Mirrors[0] != "https://secure.example" {
+		t.Fatalf("public mirrors = %#v", response.Mirrors)
+	}
+	persisted, err := store.LoadVPNGateSources()
+	if err != nil || len(persisted.Mirrors) != 1 || persisted.Mirrors[0] != "https://mirror-password@secure.example" {
+		t.Fatalf("stored mirrors = %#v, err=%v", persisted.Mirrors, err)
+	}
+
+	get := httptest.NewRecorder()
+	s.apiVPNGateSources(get, httptest.NewRequest(http.MethodGet, "/api/vpngate-sources", nil))
+	if get.Code != http.StatusOK || strings.Contains(get.Body.String(), password) {
+		t.Fatalf("GET response leaked mirror password: %d %s", get.Code, get.Body.String())
+	}
+
+	// The browser receives the redacted value, so saving it unchanged must not
+	// remove the persisted credential.
+	resave := httptest.NewRecorder()
+	s.apiVPNGateSources(resave, httptest.NewRequest(http.MethodPut, "/api/vpngate-sources", strings.NewReader(`{"text":"https://secure.example"}`)))
+	if resave.Code != http.StatusOK {
+		t.Fatalf("redacted resave = %d %s", resave.Code, resave.Body.String())
+	}
+	persisted, err = store.LoadVPNGateSources()
+	if err != nil || len(persisted.Mirrors) != 1 || persisted.Mirrors[0] != "https://mirror-password@secure.example" {
+		t.Fatalf("redacted resave lost credential: %#v, err=%v", persisted.Mirrors, err)
+	}
+}
+
 func TestVPNGateSourcesAPIErrorsPreserveOldConfig(t *testing.T) {
 	dir := t.TempDir()
 	store := state.NewStore(dir)
@@ -445,7 +498,7 @@ func TestEmbeddedVPNGateSourcesUI(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(page)
-	for _, want := range []string{"btn-sources", "sources-dialog", "sources-text", "data-i18n=\"sources.title\"", "data-i18n-placeholder=\"sources.placeholder\""} {
+	for _, want := range []string{"btn-sources", "sources-dialog", "sources-text", "data-i18n=\"sources.title\"", "data-i18n=\"sources.authHint\"", "data-i18n-placeholder=\"sources.placeholder\""} {
 		if !strings.Contains(text, want) {
 			t.Errorf("index.html missing %q", want)
 		}
@@ -454,9 +507,18 @@ func TestEmbeddedVPNGateSourcesUI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"normalizePastedURLs", "api/vpngate-sources", "clipboardData"} {
+	for _, want := range []string{"normalizePastedURLs", "api/vpngate-sources", "clipboardData", "const userinfo", "url.username"} {
 		if !strings.Contains(string(js), want) {
 			t.Errorf("app.js missing %q", want)
+		}
+	}
+	i18n, err := staticFS.ReadFile("static/i18n.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sources.authHint", "https://<password>@host"} {
+		if !strings.Contains(string(i18n), want) {
+			t.Errorf("i18n.js missing %q", want)
 		}
 	}
 }

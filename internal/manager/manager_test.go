@@ -97,6 +97,120 @@ func TestMirrorEndpointAlwaysUsesVPNGateAPIPath(t *testing.T) {
 	}
 }
 
+func TestVPNGateSourceStatusRedactsURLUserInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		if !ok || user != "source-password" || password != "" {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write(managerTestVPNGateCSV("authenticated-source"))
+	}))
+	defer server.Close()
+
+	authenticatedURL := strings.Replace(server.URL, "://", "://source-password@", 1)
+	m := managerSourceTestConfig(t, authenticatedURL)
+	if got := m.refreshNodes(context.Background(), false); len(got) != 1 {
+		t.Fatalf("nodes = %#v", got)
+	}
+
+	status := m.VPNGateSourceStatus()
+	if status.OfficialURL != server.URL || status.CurrentSource != server.URL {
+		t.Fatalf("source status = %+v, want redacted URL %q", status, server.URL)
+	}
+	if len(status.Attempts) != 1 || status.Attempts[0].URL != server.URL {
+		t.Fatalf("attempts = %#v, want redacted URL %q", status.Attempts, server.URL)
+	}
+	encoded, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "source-password") {
+		t.Fatalf("source password leaked in status: %s", encoded)
+	}
+}
+
+func TestAuthenticatedMirrorUsesBasicAuthAndRedactsConfiguration(t *testing.T) {
+	official := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "official unavailable", http.StatusBadGateway)
+	}))
+	defer official.Close()
+
+	var authMu sync.Mutex
+	authOK := false
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		authMu.Lock()
+		authOK = ok && user == "mirror-password" && password == ""
+		authMu.Unlock()
+		if !ok || user != "mirror-password" || password != "" {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write(managerTestVPNGateCSV("authenticated-mirror"))
+	}))
+	defer mirror.Close()
+
+	authenticatedMirror := strings.Replace(mirror.URL, "://", "://mirror-password@", 1)
+	m := managerSourceTestConfig(t, official.URL)
+	update, err := m.SetVPNGateMirrors(context.Background(), authenticatedMirror+"/cn/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(update.Mirrors) != 1 || update.Mirrors[0] != mirror.URL {
+		t.Fatalf("public update mirrors = %#v, want redacted %q", update.Mirrors, mirror.URL)
+	}
+	updateJSON, err := json.Marshal(update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(updateJSON), "mirror-password") {
+		t.Fatalf("update leaked mirror password: %s", updateJSON)
+	}
+	persisted, err := m.store.LoadVPNGateSources()
+	if err != nil || len(persisted.Mirrors) != 1 || persisted.Mirrors[0] != authenticatedMirror {
+		t.Fatalf("persisted mirror = %#v, err=%v", persisted.Mirrors, err)
+	}
+
+	if got := m.refreshNodes(context.Background(), false); len(got) != 1 || got[0].HostName != "authenticated-mirror" {
+		t.Fatalf("nodes = %#v", got)
+	}
+	authMu.Lock()
+	gotAuth := authOK
+	authMu.Unlock()
+	if !gotAuth {
+		t.Fatal("mirror request did not use Basic Auth from URL userinfo")
+	}
+	status := m.VPNGateSourceStatus()
+	if len(status.Mirrors) != 1 || status.Mirrors[0] != mirror.URL || status.CurrentSource != mirror.URL+mirrorAPIPath {
+		t.Fatalf("source status = %+v", status)
+	}
+	statusJSON, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(statusJSON), "mirror-password") {
+		t.Fatalf("status leaked mirror password: %s", statusJSON)
+	}
+
+	// The GET response displays a redacted source. Saving that unchanged value
+	// must keep the stored credential so an administrator does not lose it.
+	if _, err := m.SetVPNGateMirrors(context.Background(), mirror.URL); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err = m.store.LoadVPNGateSources()
+	if err != nil || len(persisted.Mirrors) != 1 || persisted.Mirrors[0] != authenticatedMirror {
+		t.Fatalf("saved redacted mirror lost its credential: %#v, err=%v", persisted.Mirrors, err)
+	}
+	restarted := New(m.cfg)
+	if len(restarted.mirrors) != 1 || restarted.mirrors[0] != authenticatedMirror {
+		t.Fatalf("restarted manager lost mirror credential: %#v", restarted.mirrors)
+	}
+	if got := restarted.VPNGateSourceStatus().Mirrors; len(got) != 1 || got[0] != mirror.URL {
+		t.Fatalf("restarted status exposed or lost mirror source: %#v", got)
+	}
+}
+
 func TestRefreshSourcesStopsAfterOfficialSuccess(t *testing.T) {
 	var mirrorRequests int
 	official := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

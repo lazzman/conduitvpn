@@ -43,30 +43,36 @@ type MirrorIssue struct {
 	Reason string `json:"reason"`
 }
 
-// ParseMirrorText extracts HTTP(S) URL tokens and normalizes them to origins.
-// It deliberately accepts surrounding prose because mirror lists are commonly
-// copied from a web page together with location labels.
-func ParseMirrorText(text string) (origins []string, issues []MirrorIssue) {
-	origins = make([]string, 0)
+// ParseMirrorText extracts HTTP(S) URL tokens and normalizes them to source
+// origins. URL userinfo is retained for HTTP Basic Auth, while paths, queries,
+// and fragments are discarded. It deliberately accepts surrounding prose
+// because mirror lists are commonly copied from a web page with location labels.
+func ParseMirrorText(text string) (sources []string, issues []MirrorIssue) {
+	sources = make([]string, 0)
 	issues = make([]MirrorIssue, 0)
 	seen := make(map[string]struct{})
 	spans := make([]mirrorURLSpan, 0)
 	for _, tokenInfo := range extractMirrorURLTokens(text) {
 		token := tokenInfo.token
 		spans = append(spans, tokenInfo.span)
-		origin, err := NormalizeMirrorOrigin(token)
+		source, err := NormalizeMirrorSource(token)
 		if err != nil {
-			issues = append(issues, MirrorIssue{Token: token, Reason: err.Error()})
+			issues = append(issues, MirrorIssue{Token: RedactSourceURL(token), Reason: err.Error()})
+			continue
+		}
+		origin, err := MirrorSourceOrigin(source)
+		if err != nil {
+			issues = append(issues, MirrorIssue{Token: RedactSourceURL(token), Reason: err.Error()})
 			continue
 		}
 		if _, ok := seen[origin]; ok {
 			continue
 		}
 		seen[origin] = struct{}{}
-		origins = append(origins, origin)
+		sources = append(sources, source)
 	}
 	appendBareMirrorIssues(text, spans, &issues)
-	return origins, issues
+	return sources, issues
 }
 
 type mirrorURLToken struct {
@@ -266,9 +272,20 @@ func countRune(values []rune, want rune) int {
 	return count
 }
 
-// NormalizeMirrorOrigin converts a URL to scheme://host[:port]. Credentials
-// are rejected so a pasted password can never be persisted accidentally.
+// NormalizeMirrorOrigin converts a credential-free URL to scheme://host[:port].
+// It is used by the DNS validation boundary, which must never consume userinfo.
 func NormalizeMirrorOrigin(raw string) (string, error) {
+	return normalizeMirrorURL(raw, false)
+}
+
+// NormalizeMirrorSource converts a source URL to
+// scheme://[userinfo@]host[:port]. It retains URL userinfo for HTTP Basic Auth
+// and strips paths, queries, and fragments before the source is persisted.
+func NormalizeMirrorSource(raw string) (string, error) {
+	return normalizeMirrorURL(raw, true)
+}
+
+func normalizeMirrorURL(raw string, allowUserInfo bool) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", errors.New("empty URL")
@@ -282,7 +299,12 @@ func NormalizeMirrorOrigin(raw string) (string, error) {
 		return "", errors.New("URL must use http or https")
 	}
 	if u.User != nil {
-		return "", errors.New("URL credentials are not allowed")
+		if !allowUserInfo {
+			return "", errors.New("URL credentials are not allowed")
+		}
+		if u.User.Username() == "" {
+			return "", errors.New("URL username must not be empty")
+		}
 	}
 	if u.Hostname() == "" || u.Opaque != "" {
 		return "", errors.New("URL must include a host")
@@ -315,13 +337,57 @@ func NormalizeMirrorOrigin(raw string) (string, error) {
 	} else if !validMirrorHostname(host) {
 		return "", errors.New("URL host is invalid")
 	}
+	normalized := &url.URL{Scheme: scheme}
 	if port == "" {
 		if strings.Contains(host, ":") {
 			host = "[" + host + "]"
 		}
-		return scheme + "://" + host, nil
+		normalized.Host = host
+	} else {
+		normalized.Host = net.JoinHostPort(host, port)
 	}
-	return scheme + "://" + net.JoinHostPort(host, port), nil
+	if u.User != nil {
+		if password, ok := u.User.Password(); ok {
+			normalized.User = url.UserPassword(u.User.Username(), password)
+		} else {
+			normalized.User = url.User(u.User.Username())
+		}
+	}
+	return normalized.String(), nil
+}
+
+// MirrorSourceOrigin returns the credential-free origin used for duplicate
+// detection and SSRF validation. It accepts the same source syntax as
+// NormalizeMirrorSource.
+func MirrorSourceOrigin(raw string) (string, error) {
+	source, err := NormalizeMirrorSource(raw)
+	if err != nil {
+		return "", err
+	}
+	u, err := url.Parse(source)
+	if err != nil {
+		return "", errors.New("invalid URL")
+	}
+	u.User = nil
+	return NormalizeMirrorOrigin(u.String())
+}
+
+// HasMirrorSourceCredentials reports whether a normalized source includes
+// non-empty URL userinfo for HTTP Basic Auth.
+func HasMirrorSourceCredentials(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.User != nil && u.User.Username() != ""
+}
+
+// RedactSourceURL removes URL userinfo before a source reaches an API response
+// or log record. Invalid input is intentionally replaced rather than echoed.
+func RedactSourceURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<invalid source URL>"
+	}
+	u.User = nil
+	return u.String()
 }
 
 // ValidateMirrorOrigin resolves the origin and rejects targets that are not

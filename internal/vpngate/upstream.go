@@ -63,9 +63,31 @@ func (c *Client) Fetch(ctx context.Context, apiURL string) ([]byte, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, c.http.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, apiURL, nil)
+	requestURL, err := url.Parse(apiURL)
+	if err != nil {
+		// url.Parse includes its input in some error messages. Do not pass a
+		// potentially credential-bearing source URL through to callers.
+		return nil, errors.New("invalid VPNGate API URL")
+	}
+	// Userinfo is accepted for source URLs so a Worker password can be
+	// expressed as https://<password>@<worker>/api/iphone/. Move it to the
+	// Authorization header before constructing the request: net/http includes
+	// a request URL in some transport errors, so retaining userinfo there could
+	// expose the password through source status or logs.
+	var authUser, authPass string
+	hasUserInfo := requestURL.User != nil
+	if hasUserInfo {
+		authUser = requestURL.User.Username()
+		authPass, _ = requestURL.User.Password()
+		requestURL.User = nil
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, requestURL.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+	if hasUserInfo {
+		req.SetBasicAuth(authUser, authPass)
 	}
 	req.Header.Set("User-Agent", userAgent)
 

@@ -46,6 +46,53 @@ func TestClientDoesNotRequestGzipCompression(t *testing.T) {
 	}
 }
 
+func TestClientUsesURLUserInfoForBasicAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		if !ok || user != "source-password" || password != "" {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte("*vpn_servers\n"))
+	}))
+	defer server.Close()
+
+	authenticatedURL := strings.Replace(server.URL, "://", "://source-password@", 1)
+	client := NewClient(nil, time.Second)
+	if _, err := client.Fetch(context.Background(), authenticatedURL); err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+}
+
+func TestClientFetchErrorDoesNotExposeURLUserInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	authenticatedURL := strings.Replace(server.URL, "://", "://source-password@", 1)
+	server.Close()
+
+	client := NewClient(nil, time.Second)
+	_, err := client.Fetch(context.Background(), authenticatedURL)
+	if err == nil {
+		t.Fatal("Fetch() error = nil, want connection failure")
+	}
+	if strings.Contains(err.Error(), "source-password") {
+		t.Fatalf("Fetch() error leaked URL userinfo: %v", err)
+	}
+}
+
+func TestClientInvalidURLDoesNotExposeURLUserInfo(t *testing.T) {
+	client := NewClient(nil, time.Second)
+	_, err := client.Fetch(context.Background(), "https://source-password@%zz")
+	if err == nil {
+		t.Fatal("Fetch() error = nil, want URL parse failure")
+	}
+	if strings.Contains(err.Error(), "source-password") {
+		t.Fatalf("Fetch() error leaked URL userinfo: %v", err)
+	}
+	if err.Error() != "invalid VPNGate API URL" {
+		t.Fatalf("Fetch() error = %q", err)
+	}
+}
+
 // fakeSocks5Server implements just enough SOCKS5 to validate the client's
 // wire behavior: greeting → (auth) → CONNECT request → reply.
 type fakeSocks5Server struct {

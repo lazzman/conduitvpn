@@ -242,7 +242,7 @@ function showSourceInputMessage(message, error = false) {
 }
 
 function normalizePastedURLs(text) {
-  const origins = [];
+  const sources = [];
   const seen = new Set();
   const starts = [];
   const startRe = /\bhttps?:\/\//gi;
@@ -257,15 +257,19 @@ function normalizePastedURLs(text) {
     token = trimPastedURLToken(token);
     try {
       const url = new URL(token);
-      if (url.username || url.password || !["http:", "https:"].includes(url.protocol)) continue;
+      if (!["http:", "https:"].includes(url.protocol) || (url.password && !url.username)) continue;
       const rawHost = url.hostname.toLowerCase().replace(/\.$/, "");
       const host = rawHost.includes(":") && !rawHost.startsWith("[") ? `[${rawHost}]` : rawHost;
       const keepPort = url.port && !((url.protocol === "http:" && url.port === "80") || (url.protocol === "https:" && url.port === "443"));
       const origin = url.protocol + "//" + host + (keepPort ? ":" + url.port : "");
-      if (!seen.has(origin)) { seen.add(origin); origins.push(origin); }
+      const userinfo = url.username
+        ? url.username + (url.password ? ":" + url.password : "") + "@"
+        : "";
+      const source = url.protocol + "//" + userinfo + host + (keepPort ? ":" + url.port : "");
+      if (!seen.has(origin)) { seen.add(origin); sources.push(source); }
     } catch (_) {}
   }
-  return origins;
+  return sources;
 }
 
 function cutPastedURLSegment(segment) {
@@ -316,12 +320,12 @@ $("sources-text").addEventListener("paste", (event) => {
     showSourceInputMessage(window.ConduitI18n.t("sources.noURL"), true);
     return;
   }
-  const origins = normalizePastedURLs(before + text + after);
-  if (origins.length === 0) {
+  const sources = normalizePastedURLs(before + text + after);
+  if (sources.length === 0) {
     showSourceInputMessage(window.ConduitI18n.t("sources.noURL"), true);
     return;
   }
-  input.value = origins.join("\n");
+  input.value = sources.join("\n");
   sourceDirty = true;
   showSourceInputMessage("");
 });

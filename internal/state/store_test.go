@@ -11,16 +11,16 @@ import (
 func TestVPNGateSourcesRoundTripAndPermissions(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)
-	origins := []string{"http://one.example", "https://two.example:8443"}
-	if err := s.SaveVPNGateSources(VPNGateSources{Mirrors: origins}); err != nil {
+	sources := []string{"http://one.example", "https://source-password@two.example:8443"}
+	if err := s.SaveVPNGateSources(VPNGateSources{Mirrors: sources}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.LoadVPNGateSources()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Mirrors) != len(origins) || got.Mirrors[0] != origins[0] || got.Mirrors[1] != origins[1] {
-		t.Fatalf("sources = %#v, want %#v", got.Mirrors, origins)
+	if len(got.Mirrors) != len(sources) || got.Mirrors[0] != sources[0] || got.Mirrors[1] != sources[1] {
+		t.Fatalf("sources = %#v, want %#v", got.Mirrors, sources)
 	}
 	info, err := os.Stat(s.VPNGateSourcesPath())
 	if err != nil {

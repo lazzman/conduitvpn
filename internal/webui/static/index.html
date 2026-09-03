@@ -57,7 +57,34 @@
   <section class="panel" data-i18n-aria-label="logs.section" aria-label="Logs"><div class="panel-head"><h2 data-i18n="logs.section">Logs</h2><div class="panel-actions"><div class="chips" id="log-chips"><button class="chip active" data-level="all" data-i18n="logs.all">All</button><button class="chip" data-level="warn" data-i18n="logs.warn">Warnings</button><button class="chip" data-level="error" data-i18n="logs.error">Errors</button></div><button id="btn-scroll" class="btn btn-ghost active" data-i18n="logs.follow" data-i18n-title="logs.followTitle" title="Auto-scroll">Follow</button><button id="btn-clear-log" class="btn btn-ghost" data-i18n="logs.clear">Clear</button></div></div><pre id="log-view" class="log-view mono"></pre></section>
 </main>
 <dialog id="blacklist-dialog" class="dialog" aria-labelledby="blacklist-title"><div class="dialog-head"><div><h2 id="blacklist-title" data-i18n="blacklist.title">Blacklist management</h2><p id="blacklist-progress" class="card-sub mono">—</p></div><button id="btn-blacklist-close" class="btn btn-ghost btn-icon" type="button" data-i18n-title="blacklist.close" data-i18n-aria-label="blacklist.close" title="Close blacklist management" aria-label="Close blacklist management"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div><div class="dialog-actions"><button id="btn-blacklist-test" class="btn" type="button" data-i18n="blacklist.test">Test all</button><button id="btn-blacklist-restore" class="btn btn-ghost" type="button" data-i18n="blacklist.restore" disabled>Restore available nodes</button></div><div class="table-wrap blacklist-table-wrap"><table id="blacklist-table"><thead><tr><th data-i18n="blacklist.host">Host</th><th data-i18n="blacklist.node">Node</th><th data-i18n="blacklist.reason">Blacklist reason</th><th data-i18n="blacklist.time">Blacklisted at</th><th data-i18n="blacklist.result">Verification result</th></tr></thead><tbody></tbody></table></div></dialog>
-<dialog id="sources-dialog" class="dialog sources-dialog" aria-labelledby="sources-title"><div class="dialog-head"><div><h2 id="sources-title" data-i18n="sources.title">VPNGate sources</h2><p class="card-sub" data-i18n="sources.subtitle">Official source is always tried first. Mirrors are fallbacks.</p></div><button id="btn-sources-close" class="btn btn-ghost btn-icon" type="button" data-i18n-title="sources.close" data-i18n-aria-label="sources.close" title="Close source settings" aria-label="Close source settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div><div class="sources-body"><label class="source-label" for="sources-official" data-i18n="sources.official">Official source</label><input id="sources-official" class="input source-official" type="text" readonly><label class="source-label" for="sources-text" data-i18n="sources.mirrors">Mirror URLs</label><textarea id="sources-text" class="input sources-text" rows="8" spellcheck="false" data-i18n-placeholder="sources.placeholder" placeholder="http://mirror.example"></textarea><p id="sources-input-msg" class="source-msg"></p><div class="source-status"><div><span data-i18n="sources.current">Current source</span><strong id="sources-current" class="mono">—</strong></div><div><span data-i18n="sources.lastAttempt">Last attempt</span><strong id="sources-last-attempt" class="mono">—</strong></div><div><span data-i18n="sources.lastSuccess">Last success</span><strong id="sources-last-success" class="mono">—</strong></div><p id="sources-attempts" class="mono"></p></div></div><div class="dialog-actions sources-actions"><button id="btn-sources-save" class="btn" type="button" data-i18n="sources.save">Save and refresh</button><button id="btn-sources-cancel" class="btn btn-ghost" type="button" data-i18n="sources.cancel">Cancel</button><span id="sources-save-msg" class="source-msg"></span></div></dialog>
+<dialog id="sources-dialog" class="dialog sources-dialog" aria-labelledby="sources-title">
+  <div class="dialog-head">
+    <div>
+      <h2 id="sources-title" data-i18n="sources.title">VPNGate sources</h2>
+      <p class="card-sub" data-i18n="sources.subtitle">Official source is always tried first. Mirrors are fallbacks.</p>
+    </div>
+    <button id="btn-sources-close" class="btn btn-ghost btn-icon" type="button" data-i18n-title="sources.close" data-i18n-aria-label="sources.close" title="Close source settings" aria-label="Close source settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="sources-body">
+    <label class="source-label" for="sources-official" data-i18n="sources.official">Official source</label>
+    <input id="sources-official" class="input source-official" type="text" readonly>
+    <label class="source-label" for="sources-text" data-i18n="sources.mirrors">Mirror URLs</label>
+    <textarea id="sources-text" class="input sources-text" rows="8" spellcheck="false" data-i18n-placeholder="sources.placeholder" placeholder="http://mirror.example"></textarea>
+    <p class="source-auth-hint" data-i18n="sources.authHint">For HTTP Basic Auth, include credentials in the source URL.</p>
+    <p id="sources-input-msg" class="source-msg"></p>
+    <div class="source-status">
+      <div><span data-i18n="sources.current">Current source</span><strong id="sources-current" class="mono">—</strong></div>
+      <div><span data-i18n="sources.lastAttempt">Last attempt</span><strong id="sources-last-attempt" class="mono">—</strong></div>
+      <div><span data-i18n="sources.lastSuccess">Last success</span><strong id="sources-last-success" class="mono">—</strong></div>
+      <p id="sources-attempts" class="mono"></p>
+    </div>
+  </div>
+  <div class="dialog-actions sources-actions">
+    <button id="btn-sources-save" class="btn" type="button" data-i18n="sources.save">Save and refresh</button>
+    <button id="btn-sources-cancel" class="btn btn-ghost" type="button" data-i18n="sources.cancel">Cancel</button>
+    <span id="sources-save-msg" class="source-msg"></span>
+  </div>
+</dialog>
 <footer class="site-footer"><a href="https://github.com/sarices/conduitvpn" target="_blank" rel="noreferrer">GitHub</a><span>Copyright © 2026 ConduitVPN</span></footer>
 <script src="./app.js?v=__VER__"></script>
 </body>

@@ -102,20 +102,23 @@ func TestParseMirrorTextHandlesSeparatorsWithoutWhitespace(t *testing.T) {
 	}
 }
 
-func TestParseMirrorTextReportsCredentialsAndBareAddresses(t *testing.T) {
-	origins, issues := ParseMirrorText("http://user:secret@example.com/cn/ example.net:8080) 203.0.113.7 [::1] ftp://example.com")
-	if len(origins) != 0 {
-		t.Fatalf("origins = %#v, want none", origins)
+func TestParseMirrorTextAcceptsCredentialsAndReportsBareAddresses(t *testing.T) {
+	sources, issues := ParseMirrorText("http://user:secret@example.com/cn/ example.net:8080) 203.0.113.7 [::1] ftp://example.com")
+	if len(sources) != 1 || sources[0] != "http://user:secret@example.com" {
+		t.Fatalf("sources = %#v, want authenticated source", sources)
 	}
-	if len(issues) < 5 {
-		t.Fatalf("issues = %#v, want credential and bare-address issues", issues)
+	if len(issues) < 4 {
+		t.Fatalf("issues = %#v, want bare-address issues", issues)
 	}
 	joined := make([]string, 0, len(issues))
 	for _, issue := range issues {
 		joined = append(joined, issue.Token+": "+issue.Reason)
 	}
 	all := strings.Join(joined, "\n")
-	for _, want := range []string{"user:secret@example.com", "example.net:8080", "203.0.113.7", "[::1]", "example.com"} {
+	if strings.Contains(all, "secret") {
+		t.Fatalf("issues leaked source credential: %q", all)
+	}
+	for _, want := range []string{"example.net:8080", "203.0.113.7", "[::1]", "example.com"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("issues %q do not mention %q", all, want)
 		}
@@ -159,6 +162,59 @@ func TestNormalizeMirrorOrigin(t *testing.T) {
 				t.Fatalf("NormalizeMirrorOrigin(%q) = %q, want error", tt.raw, got)
 			}
 		})
+	}
+}
+
+func TestNormalizeMirrorSourcePreservesBasicAuthAndRedactsItForDisplay(t *testing.T) {
+	tests := []struct {
+		raw      string
+		source   string
+		origin   string
+		redacted string
+	}{
+		{
+			raw:      "HTTPS://source-password@Example.COM:443/cn/?ignored=1#fragment",
+			source:   "https://source-password@example.com",
+			origin:   "https://example.com",
+			redacted: "https://example.com",
+		},
+		{
+			raw:      "https://user:pass@Example.COM:8443/api/iphone/",
+			source:   "https://user:pass@example.com:8443",
+			origin:   "https://example.com:8443",
+			redacted: "https://example.com:8443",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			source, err := NormalizeMirrorSource(tt.raw)
+			if err != nil || source != tt.source {
+				t.Fatalf("NormalizeMirrorSource(%q) = %q, %v; want %q", tt.raw, source, err, tt.source)
+			}
+			origin, err := MirrorSourceOrigin(source)
+			if err != nil || origin != tt.origin {
+				t.Fatalf("MirrorSourceOrigin(%q) = %q, %v; want %q", source, origin, err, tt.origin)
+			}
+			if got := RedactSourceURL(source); got != tt.redacted {
+				t.Fatalf("RedactSourceURL(%q) = %q, want %q", source, got, tt.redacted)
+			}
+			if !HasMirrorSourceCredentials(source) {
+				t.Fatalf("HasMirrorSourceCredentials(%q) = false", source)
+			}
+		})
+	}
+	if _, err := NormalizeMirrorSource("https://:secret@example.com"); err == nil {
+		t.Fatal("NormalizeMirrorSource accepted an empty Basic Auth username")
+	}
+}
+
+func TestParseMirrorTextRedactsInvalidCredentialIssue(t *testing.T) {
+	sources, issues := ParseMirrorText("https://:secret@example.com")
+	if len(sources) != 0 || len(issues) != 1 {
+		t.Fatalf("sources=%#v issues=%#v", sources, issues)
+	}
+	if issues[0].Token != "https://example.com" || strings.Contains(issues[0].Token, "secret") {
+		t.Fatalf("credential leaked in issue: %#v", issues[0])
 	}
 }
 
